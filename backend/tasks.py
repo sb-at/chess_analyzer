@@ -119,14 +119,236 @@ def import_games_task(self, job_id: str, user_id: str, platform: str, username: 
 
 
 @celery_app.task(bind=True, name="tasks.analyze_game_task")
-def analyze_game_task(self, game_id: str, user_id: str):
+def analyze_game_task(self, game_id: str):
     """Background task to analyze a single game with Stockfish."""
-    # This will be implemented in Phase 2
-    pass
+    from database import get_mongodb
+    from analysis import StockfishAnalyzer
+    import asyncio
+    from bson import ObjectId
+
+    try:
+        mongodb = get_mongodb()
+        games_collection = mongodb.games
+
+        # Get game from MongoDB
+        game = asyncio.run(games_collection.find_one({"_id": ObjectId(game_id)}))
+
+        if not game:
+            return {"error": "Game not found"}
+
+        if game.get('analyzed'):
+            return {"status": "already_analyzed", "game_id": game_id}
+
+        # Analyze game with Stockfish
+        with StockfishAnalyzer() as analyzer:
+            analysis = analyzer.analyze_game(game['pgn'])
+
+        # Update game with analysis
+        asyncio.run(
+            games_collection.update_one(
+                {"_id": ObjectId(game_id)},
+                {
+                    "$set": {
+                        "moves": analysis['moves_analysis'],
+                        "stats": analysis['stats'],
+                        "analyzed": True,
+                        "analyzed_at": datetime.utcnow()
+                    }
+                }
+            )
+        )
+
+        return {
+            "status": "completed",
+            "game_id": game_id,
+            "stats": analysis['stats']
+        }
+
+    except Exception as e:
+        print(f"Error analyzing game {game_id}: {e}")
+        return {"error": str(e), "game_id": game_id}
+
+
+@celery_app.task(bind=True, name="tasks.analyze_games_batch_task")
+def analyze_games_batch_task(self, job_id: str, user_id: str, limit: int = 100):
+    """Background task to analyze multiple games in batch."""
+    from database import SessionLocal, get_mongodb
+    from models import Job
+    from analysis import BatchGameAnalyzer
+    import asyncio
+    from uuid import UUID
+
+    db = SessionLocal()
+    job = db.query(Job).filter(Job.id == UUID(job_id)).first()
+
+    if not job:
+        return {"error": "Job not found"}
+
+    job.status = "running"
+    job.started_at = datetime.utcnow()
+    db.commit()
+
+    try:
+        mongodb = get_mongodb()
+        games_collection = mongodb.games
+
+        # Get unanalyzed games for user
+        cursor = games_collection.find({
+            "user_id": user_id,
+            "analyzed": {"$ne": True}
+        }).limit(limit)
+
+        games = asyncio.run(cursor.to_list(length=limit))
+
+        if not games:
+            job.status = "completed"
+            job.completed_at = datetime.utcnow()
+            job.progress = 100
+            db.commit()
+            return {"status": "no_games_to_analyze"}
+
+        job.total_items = len(games)
+        db.commit()
+
+        # Analyze games in batches
+        analyzer = BatchGameAnalyzer()
+        batch_size = 10
+
+        for i in range(0, len(games), batch_size):
+            batch = games[i:i + batch_size]
+            analyzed = analyzer.analyze_games_batch(batch)
+
+            # Update games in MongoDB
+            for analyzed_game in analyzed:
+                if analyzed_game.get('analyzed'):
+                    asyncio.run(
+                        games_collection.update_one(
+                            {"_id": analyzed_game['_id']},
+                            {
+                                "$set": {
+                                    "moves": analyzed_game['moves'],
+                                    "stats": analyzed_game['stats'],
+                                    "analyzed": True,
+                                    "analyzed_at": analyzed_game['analyzed_at']
+                                }
+                            }
+                        )
+                    )
+
+            # Update progress
+            progress = int((i + len(batch)) / len(games) * 100)
+            job.progress = progress
+            job.processed_items = i + len(batch)
+            db.commit()
+
+        job.status = "completed"
+        job.completed_at = datetime.utcnow()
+        job.progress = 100
+        db.commit()
+
+        return {
+            "status": "completed",
+            "total_analyzed": len(games)
+        }
+
+    except Exception as e:
+        job.status = "failed"
+        job.error_message = str(e)
+        job.completed_at = datetime.utcnow()
+        db.commit()
+        raise
+
+    finally:
+        db.close()
 
 
 @celery_app.task(bind=True, name="tasks.analyze_user_patterns_task")
-def analyze_user_patterns_task(self, user_id: str):
+def analyze_user_patterns_task(self, job_id: str, user_id: str):
     """Background task to detect patterns across all user games."""
-    # This will be implemented in Phase 2
-    pass
+    from database import SessionLocal, get_mongodb
+    from models import Job, Pattern
+    from pattern_detection import PatternAggregator
+    import asyncio
+    from uuid import UUID
+
+    db = SessionLocal()
+    job = db.query(Job).filter(Job.id == UUID(job_id)).first()
+
+    if not job:
+        return {"error": "Job not found"}
+
+    job.status = "running"
+    job.started_at = datetime.utcnow()
+    db.commit()
+
+    try:
+        mongodb = get_mongodb()
+        games_collection = mongodb.games
+
+        # Get analyzed games for user
+        cursor = games_collection.find({
+            "user_id": user_id,
+            "analyzed": True
+        }).sort("date", -1)
+
+        games = asyncio.run(cursor.to_list(length=None))
+
+        if len(games) < 5:
+            job.status = "completed"
+            job.completed_at = datetime.utcnow()
+            job.metadata = {
+                **job.metadata,
+                "error": "Insufficient analyzed games (minimum 5 required)"
+            }
+            db.commit()
+            return {"error": "Insufficient analyzed games"}
+
+        # Run pattern detection
+        aggregator = PatternAggregator()
+        result = asyncio.run(aggregator.analyze_user_games(games))
+
+        # Delete existing patterns for user
+        db.query(Pattern).filter(Pattern.user_id == UUID(user_id)).delete()
+
+        # Save new patterns to database
+        for pattern_data in result.get('all_patterns', []):
+            pattern = Pattern(
+                user_id=UUID(user_id),
+                pattern_type=pattern_data.get('pattern_type'),
+                pattern_subtype=pattern_data.get('pattern_subtype'),
+                severity=pattern_data.get('severity'),
+                frequency=pattern_data.get('frequency'),
+                first_seen=pattern_data.get('first_seen'),
+                last_seen=pattern_data.get('last_seen'),
+                examples=pattern_data.get('examples'),
+                metadata=pattern_data.get('metadata', {})
+            )
+            db.add(pattern)
+
+        db.commit()
+
+        job.status = "completed"
+        job.completed_at = datetime.utcnow()
+        job.progress = 100
+        job.metadata = {
+            **job.metadata,
+            "patterns_found": len(result.get('all_patterns', [])),
+            "games_analyzed": result.get('analyzed_games_count')
+        }
+        db.commit()
+
+        return {
+            "status": "completed",
+            "patterns_found": len(result.get('all_patterns', [])),
+            "top_3_blindspots": result.get('top_3_blindspots', [])
+        }
+
+    except Exception as e:
+        job.status = "failed"
+        job.error_message = str(e)
+        job.completed_at = datetime.utcnow()
+        db.commit()
+        raise
+
+    finally:
+        db.close()

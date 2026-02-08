@@ -79,12 +79,26 @@ export default function Dashboard() {
           <div className="container mx-auto px-4 py-4">
             <div className="flex justify-between items-center">
               <div className="text-2xl font-bold text-blue-600">ChessMirror</div>
-              <button
-                onClick={handleLogout}
-                className="text-gray-600 hover:text-gray-800"
-              >
-                Logout
-              </button>
+              <div className="space-x-4">
+                <button
+                  onClick={() => router.push('/analyze')}
+                  className="text-gray-600 hover:text-gray-800"
+                >
+                  Analyze
+                </button>
+                <button
+                  onClick={() => router.push('/import')}
+                  className="text-gray-600 hover:text-gray-800"
+                >
+                  Import
+                </button>
+                <button
+                  onClick={handleLogout}
+                  className="text-gray-600 hover:text-gray-800"
+                >
+                  Logout
+                </button>
+              </div>
             </div>
           </div>
         </nav>
