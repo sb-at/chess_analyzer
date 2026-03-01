@@ -1,9 +1,28 @@
 import { useState } from 'react'
 import Head from 'next/head'
-import AuthModal from '@/components/AuthModal'
+import { useRouter } from 'next/router'
 
 export default function Home() {
-  const [showAuthModal, setShowAuthModal] = useState(false)
+  const router = useRouter()
+  const [username, setUsername] = useState('')
+  const [platform, setPlatform] = useState<'lichess' | 'chess.com'>('lichess')
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
+
+  const handleAnalyze = async (e: React.FormEvent) => {
+    e.preventDefault()
+
+    if (!username.trim()) {
+      setError(`Please enter a ${platform === 'lichess' ? 'Lichess' : 'Chess.com'} username`)
+      return
+    }
+
+    setLoading(true)
+    setError('')
+
+    // Redirect to time control selection page
+    router.push(`/select-time-control?platform=${platform}&username=${encodeURIComponent(username.trim())}`)
+  }
 
   return (
     <>
@@ -20,12 +39,6 @@ export default function Home() {
           <div className="container mx-auto px-4 py-4">
             <div className="flex justify-between items-center">
               <div className="text-2xl font-bold text-blue-600">ChessMirror</div>
-              <button
-                onClick={() => setShowAuthModal(true)}
-                className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 transition"
-              >
-                Sign In
-              </button>
             </div>
           </div>
         </nav>
@@ -42,12 +55,59 @@ export default function Home() {
                 blind spots, and recurring mistakes. Get personalized insights
                 that actually improve your game.
               </p>
-              <button
-                onClick={() => setShowAuthModal(true)}
-                className="bg-white text-blue-600 px-8 py-4 rounded-lg font-semibold text-lg hover:bg-gray-100 transition shadow-lg"
-              >
-                Start Free Analysis
-              </button>
+
+              <form onSubmit={handleAnalyze} className="max-w-md mx-auto">
+                {/* Platform Selector */}
+                <div className="mb-4 flex justify-center gap-6">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="platform"
+                      value="lichess"
+                      checked={platform === 'lichess'}
+                      onChange={(e) => setPlatform('lichess')}
+                      disabled={loading}
+                      className="w-4 h-4 text-blue-600"
+                    />
+                    <span className="text-white font-medium">Lichess</span>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="platform"
+                      value="chess.com"
+                      checked={platform === 'chess.com'}
+                      onChange={(e) => setPlatform('chess.com')}
+                      disabled={loading}
+                      className="w-4 h-4 text-blue-600"
+                    />
+                    <span className="text-white font-medium">Chess.com</span>
+                  </label>
+                </div>
+
+                <div className="flex gap-3">
+                  <input
+                    type="text"
+                    value={username}
+                    onChange={(e) => setUsername(e.target.value)}
+                    placeholder="Enter your username"
+                    className="flex-1 px-4 py-4 rounded-lg text-gray-800 text-lg focus:outline-none focus:ring-2 focus:ring-blue-400"
+                    disabled={loading}
+                  />
+                  <button
+                    type="submit"
+                    disabled={loading}
+                    className="bg-white text-blue-600 px-8 py-4 rounded-lg font-semibold text-lg hover:bg-gray-100 transition shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {loading ? 'Starting...' : 'Analyze'}
+                  </button>
+                </div>
+                {error && (
+                  <div className="mt-4 bg-red-100 border border-red-400 text-red-700 px-4 py-2 rounded">
+                    {error}
+                  </div>
+                )}
+              </form>
             </div>
           </div>
         </section>
@@ -59,8 +119,8 @@ export default function Home() {
             <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
               <FeatureCard
                 number="1"
-                title="Connect Your Account"
-                description="Link your Chess.com or Lichess account in seconds. We'll automatically import your games."
+                title="Enter Your Username"
+                description="Choose your platform (Lichess or Chess.com) and enter your username - no signup or authentication required."
               />
               <FeatureCard
                 number="2"
@@ -108,14 +168,55 @@ export default function Home() {
           <div className="container mx-auto px-4 text-center">
             <h2 className="text-3xl font-bold mb-4">Ready to See Your Blind Spots?</h2>
             <p className="text-xl mb-8 text-blue-100">
-              Join thousands of players improving their game with ChessMirror
+              Instant analysis - no signup required
             </p>
-            <button
-              onClick={() => setShowAuthModal(true)}
-              className="bg-white text-blue-600 px-8 py-4 rounded-lg font-semibold text-lg hover:bg-gray-100 transition shadow-lg"
-            >
-              Get Started Free
-            </button>
+            <form onSubmit={handleAnalyze} className="max-w-md mx-auto">
+              {/* Platform Selector */}
+              <div className="mb-4 flex justify-center gap-6">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="radio"
+                    name="platform-cta"
+                    value="lichess"
+                    checked={platform === 'lichess'}
+                    onChange={(e) => setPlatform('lichess')}
+                    disabled={loading}
+                    className="w-4 h-4 text-blue-600"
+                  />
+                  <span className="text-white font-medium">Lichess</span>
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="radio"
+                    name="platform-cta"
+                    value="chess.com"
+                    checked={platform === 'chess.com'}
+                    onChange={(e) => setPlatform('chess.com')}
+                    disabled={loading}
+                    className="w-4 h-4 text-blue-600"
+                  />
+                  <span className="text-white font-medium">Chess.com</span>
+                </label>
+              </div>
+
+              <div className="flex gap-3">
+                <input
+                  type="text"
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
+                  placeholder="Your username"
+                  className="flex-1 px-4 py-4 rounded-lg text-gray-800 text-lg focus:outline-none focus:ring-2 focus:ring-blue-400"
+                  disabled={loading}
+                />
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="bg-white text-blue-600 px-8 py-4 rounded-lg font-semibold text-lg hover:bg-gray-100 transition shadow-lg disabled:opacity-50"
+                >
+                  {loading ? 'Starting...' : 'Analyze'}
+                </button>
+              </div>
+            </form>
           </div>
         </section>
 
@@ -126,11 +227,6 @@ export default function Home() {
           </div>
         </footer>
 
-        {/* Auth Modal */}
-        <AuthModal
-          isOpen={showAuthModal}
-          onClose={() => setShowAuthModal(false)}
-        />
       </main>
     </>
   )

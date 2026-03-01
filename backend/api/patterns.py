@@ -26,12 +26,13 @@ async def get_user_patterns(
             "id": str(pattern.id),
             "pattern_type": pattern.pattern_type,
             "pattern_subtype": pattern.pattern_subtype,
+            "description": pattern.description,  # Human-readable description
             "severity": pattern.severity,
             "frequency": pattern.frequency,
             "first_seen": pattern.first_seen,
             "last_seen": pattern.last_seen,
             "examples": pattern.examples,
-            "metadata": pattern.metadata
+            "metadata": pattern.pattern_metadata
         })
 
     top_3 = patterns_list[:3]
@@ -69,12 +70,13 @@ async def get_pattern(
         "id": str(pattern.id),
         "pattern_type": pattern.pattern_type,
         "pattern_subtype": pattern.pattern_subtype,
+        "description": pattern.description,  # Human-readable description
         "severity": pattern.severity,
         "frequency": pattern.frequency,
         "first_seen": pattern.first_seen,
         "last_seen": pattern.last_seen,
         "examples": pattern.examples,
-        "metadata": pattern.metadata
+        "metadata": pattern.pattern_metadata
     }
 
 

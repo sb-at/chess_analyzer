@@ -35,12 +35,13 @@ class Pattern(Base):
     user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"))
     pattern_type = Column(String(50), nullable=False)
     pattern_subtype = Column(String(100), nullable=False)
+    description = Column(Text, nullable=True)  # Human-readable description
     severity = Column(Float, nullable=True)
     frequency = Column(Integer, default=0)
     first_seen = Column(DateTime, nullable=True)
     last_seen = Column(DateTime, nullable=True)
     examples = Column(JSONB, nullable=True)
-    metadata = Column(JSONB, nullable=True)
+    pattern_metadata = Column(JSONB, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -85,14 +86,14 @@ class Job(Base):
     __tablename__ = "jobs"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"))
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=True)  # Nullable for public analysis
     job_type = Column(String(50), nullable=False)
     status = Column(String(20), default="pending")
     progress = Column(Integer, default=0)
     total_items = Column(Integer, nullable=True)
     processed_items = Column(Integer, default=0)
     error_message = Column(Text, nullable=True)
-    metadata = Column(JSONB, nullable=True)
+    job_metadata = Column(JSONB, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     started_at = Column(DateTime, nullable=True)
     completed_at = Column(DateTime, nullable=True)

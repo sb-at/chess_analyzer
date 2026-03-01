@@ -69,6 +69,43 @@ class ChessComClient:
 
         return processed_games
 
+    async def get_time_controls_quick(self, sample_size: int = 100) -> tuple[dict[str, int], int]:
+        """Quickly scan recent games to discover time controls played.
+
+        Args:
+            sample_size: Number of games to sample
+
+        Returns:
+            Tuple of (time_controls_dict, total_sampled) where:
+            - time_controls_dict: {time_control: count}
+            - total_sampled: Number of games actually sampled
+        """
+        archives = await self.get_game_archives()
+        time_controls = {}
+        total_sampled = 0
+
+        # Start from most recent archive and work backwards
+        for archive_url in reversed(archives):
+            if total_sampled >= sample_size:
+                break
+
+            month_games = await self.get_games_from_archive(archive_url)
+
+            for game in month_games:
+                if total_sampled >= sample_size:
+                    break
+
+                # Extract time control from game data
+                time_control = game.get("time_control", "")
+                if not time_control:
+                    time_control = "correspondence"
+
+                # Count this time control
+                time_controls[time_control] = time_controls.get(time_control, 0) + 1
+                total_sampled += 1
+
+        return time_controls, total_sampled
+
     def _process_game(self, game_data: dict) -> Optional[dict]:
         """Process raw Chess.com game data into standardized format."""
         try:

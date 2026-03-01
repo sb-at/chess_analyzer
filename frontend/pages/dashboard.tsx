@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react'
-import Head from 'head'
+import Head from 'next/head'
 import { useRouter } from 'next/router'
 
 interface Pattern {
   id: string
   pattern_type: string
   pattern_subtype: string
+  description?: string  // Human-readable description
   severity: number
   frequency: number
   metadata?: any
@@ -179,11 +180,11 @@ function PatternCard({ pattern, rank }: { pattern: Pattern; rank: number }) {
       </div>
 
       <h3 className="text-lg font-semibold mb-2">
-        {formatPatternName(pattern.pattern_subtype)}
+        {pattern.description || formatPatternName(pattern.pattern_subtype)}
       </h3>
 
       <div className="text-sm text-gray-600 mb-3">
-        Frequency: {pattern.frequency} times
+        {!pattern.description && `Frequency: ${pattern.frequency} times`}
       </div>
     </div>
   )
@@ -193,11 +194,16 @@ function PatternRow({ pattern }: { pattern: Pattern }) {
   return (
     <div className="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
       <div>
-        <h4 className="font-semibold">{formatPatternName(pattern.pattern_subtype)}</h4>
-        <p className="text-sm text-gray-600">Type: {pattern.pattern_type}</p>
+        <h4 className="font-semibold">
+          {pattern.description || formatPatternName(pattern.pattern_subtype)}
+        </h4>
+        <p className="text-sm text-gray-600">
+          Type: {pattern.pattern_type}
+          {pattern.metadata?.pattern_category && ` • ${pattern.metadata.pattern_category}`}
+        </p>
       </div>
       <div className="text-right">
-        <div className="text-sm text-gray-600">Frequency: {pattern.frequency}</div>
+        {!pattern.description && <div className="text-sm text-gray-600">Frequency: {pattern.frequency}</div>}
         <div className="text-sm text-gray-600">Severity: {(pattern.severity * 100).toFixed(0)}%</div>
       </div>
     </div>

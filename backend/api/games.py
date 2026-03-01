@@ -59,7 +59,7 @@ async def import_games(
         user_id=current_user.id,
         job_type="import",
         status="pending",
-        metadata={
+        job_metadata={
             "platform": request.platform,
             "username": username,
             "limit": request.limit

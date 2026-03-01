@@ -74,6 +74,7 @@ services:
       context: ./backend
       dockerfile: Dockerfile.dev
     container_name: chessmirror-worker
+    working_dir: /app
     environment:
       - DATABASE_URL=postgresql://chessmirror:chessmirror_dev@postgres:5432/chessmirror
       - MONGODB_URL=mongodb://mongodb:27017/chessmirror
@@ -88,7 +89,7 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-    command: celery -A tasks.celery_app worker --loglevel=info --concurrency=4
+    command: sh -c "cd /app && celery -A tasks.celery_app worker --loglevel=info --concurrency=4"
 
   frontend:
     build:
@@ -105,6 +106,8 @@ services:
     depends_on:
       - backend
     command: npm run dev
+    # NOTE: Hot reload may not work reliably. Restart container to see changes:
+    # docker restart chessmirror-frontend
 
 volumes:
   postgres_data:

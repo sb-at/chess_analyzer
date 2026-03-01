@@ -21,7 +21,7 @@ class LichessClient:
         if self.token:
             headers["Authorization"] = f"Bearer {self.token}"
 
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        async with httpx.AsyncClient(timeout=30.0, verify=False) as client:
             response = await client.get(
                 f"{self.base_url}/user/{self.username}",
                 headers=headers
@@ -43,7 +43,7 @@ class LichessClient:
             "opening": "true"
         }
 
-        async with httpx.AsyncClient(timeout=300.0) as client:
+        async with httpx.AsyncClient(timeout=300.0, verify=False) as client:
             async with client.stream(
                 "GET",
                 f"{self.base_url}/games/user/{self.username}",
@@ -72,6 +72,36 @@ class LichessClient:
                 games.append(processed)
 
         return games
+
+    async def get_time_controls_quick(self, sample_size: int = 100) -> tuple[dict[str, int], int]:
+        """Quickly scan recent games to discover time controls played.
+
+        Args:
+            sample_size: Number of games to sample
+
+        Returns:
+            Tuple of (time_controls_dict, total_sampled) where:
+            - time_controls_dict: {time_control: count}
+            - total_sampled: Number of games actually sampled
+        """
+        time_controls = {}
+        total_sampled = 0
+
+        async for game_data in self.stream_games(max_games=sample_size):
+            # Extract time control without full game processing
+            clock = game_data.get("clock", {})
+            if clock:
+                initial = clock.get("initial", 0) // 60  # Convert seconds to minutes
+                increment = clock.get("increment", 0)
+                time_control = f"{initial}+{increment}"
+            else:
+                time_control = "correspondence"
+
+            # Count this time control
+            time_controls[time_control] = time_controls.get(time_control, 0) + 1
+            total_sampled += 1
+
+        return time_controls, total_sampled
 
     def _process_game(self, game_data: dict) -> Optional[dict]:
         """Process raw Lichess game data into standardized format."""

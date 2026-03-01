@@ -31,7 +31,7 @@ CREATE TABLE IF NOT EXISTS patterns (
     first_seen TIMESTAMP,
     last_seen TIMESTAMP,
     examples JSONB, -- array of {game_id, move_number, fen, etc.}
-    metadata JSONB, -- additional pattern-specific data
+    pattern_metadata JSONB, -- additional pattern-specific data
     created_at TIMESTAMP DEFAULT NOW(),
     updated_at TIMESTAMP DEFAULT NOW()
 );
@@ -67,7 +67,7 @@ CREATE TABLE IF NOT EXISTS jobs (
     total_items INT,
     processed_items INT DEFAULT 0,
     error_message TEXT,
-    metadata JSONB,
+    job_metadata JSONB,
     created_at TIMESTAMP DEFAULT NOW(),
     started_at TIMESTAMP,
     completed_at TIMESTAMP

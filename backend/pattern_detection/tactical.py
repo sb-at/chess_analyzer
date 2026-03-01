@@ -12,10 +12,41 @@ class TacticalPatternDetector:
     def __init__(self):
         """Initialize tactical pattern detector."""
         self.tactical_motifs = [
-            'fork', 'pin', 'skewer', 'discovered_attack',
-            'double_attack', 'trapped_piece', 'deflection',
-            'decoy', 'removal_of_defender'
+            'fork', 'pin', 'skewer', 'discovered_attack', 'discovered_check',
+            'double_attack', 'trapped_piece', 'deflection', 'decoy',
+            'removal_of_defender', 'back_rank_mate', 'hanging_piece',
+            'zwischenzug', 'desperado', 'x_ray_attack'
         ]
+
+        # Human-readable pattern descriptions
+        self.pattern_descriptions = {
+            # Offensive patterns (missed opportunities)
+            'missed_fork': 'You missed {count} fork opportunities',
+            'missed_pin': 'You missed {count} pin opportunities',
+            'missed_skewer': 'You missed {count} skewer opportunities',
+            'missed_discovered_attack': 'You missed {count} discovered attack opportunities',
+            'missed_discovered_check': 'You missed {count} discovered check opportunities',
+            'missed_double_attack': 'You missed {count} double attack opportunities',
+            'missed_trapped_piece': 'You missed {count} opportunities to trap opponent pieces',
+            'missed_deflection': 'You missed {count} deflection tactics',
+            'missed_removal_of_defender': 'You missed {count} removal of defender tactics',
+            'missed_back_rank_mate': 'You missed {count} back rank mate opportunities',
+            'missed_hanging_piece': 'You missed {count} hanging pieces to capture',
+            'missed_tactical_miss': 'You missed {count} tactical opportunities',
+            'missed_tactical_combination': 'You missed {count} tactical combinations',
+
+            # Defensive patterns (fell for tactics)
+            'fell_for_fork': 'You fell for fork attacks {count} times',
+            'fell_for_pin': 'You got pinned {count} times',
+            'fell_for_skewer': 'You fell for skewer attacks {count} times',
+            'fell_for_discovered_attack': 'You fell for discovered attacks {count} times',
+            'fell_for_discovered_check': 'You fell for discovered check attacks {count} times',
+            'fell_for_double_attack': 'You fell for double attacks {count} times',
+            'fell_for_trapped_piece': 'Your pieces got trapped {count} times',
+            'fell_for_back_rank_mate': 'You fell for back rank threats {count} times',
+            'left_piece_hanging': 'You left pieces hanging {count} times',
+            'fell_for_tactical': 'You fell for tactical threats {count} times'
+        }
 
     def detect(self, games: List[Dict]) -> List[Dict]:
         """Detect tactical patterns across games.
@@ -28,16 +59,21 @@ class TacticalPatternDetector:
         """
         all_patterns = []
 
-        # Collect all tactical mistakes
-        tactical_mistakes = self._collect_tactical_mistakes(games)
+        # Collect offensive patterns (missed opportunities)
+        missed_tactics = self._collect_missed_tactics(games)
+        missed_patterns = self._aggregate_patterns(missed_tactics, pattern_prefix='missed_')
 
-        # Aggregate and identify patterns
-        patterns = self._aggregate_patterns(tactical_mistakes)
+        # Collect defensive patterns (fell for opponent tactics)
+        defensive_mistakes = self._collect_defensive_mistakes(games)
+        defensive_patterns = self._aggregate_patterns(defensive_mistakes, pattern_prefix='fell_for_')
 
-        return patterns
+        # Combine all patterns
+        all_patterns = missed_patterns + defensive_patterns
 
-    def _collect_tactical_mistakes(self, games: List[Dict]) -> List[Dict]:
-        """Collect all tactical mistakes from games."""
+        return all_patterns
+
+    def _collect_missed_tactics(self, games: List[Dict]) -> List[Dict]:
+        """Collect all missed tactical opportunities from games."""
         mistakes = []
 
         for game in games:
@@ -46,12 +82,24 @@ class TacticalPatternDetector:
 
             game_id = game.get('_id') or game.get('game_id')
             moves = game.get('moves', [])
+            username = game.get('username', '').lower()
+            white_player = game.get('white', {}).get('username', '').lower()
 
             for move_data in moves:
+                # Determine if this is the user's move
+                move_num = move_data.get('move_number', 0)
+                is_white_move = (move_num % 1) == 0.5 if move_num > 0 else True
+                is_user_move = (is_white_move and username == white_player) or \
+                               (not is_white_move and username != white_player)
+
+                # Only track missed tactics on user's own moves
+                if not is_user_move:
+                    continue
+
                 # Look for significant eval swings (missed tactics)
                 if move_data.get('is_blunder') or move_data.get('is_mistake'):
                     # Identify tactical motif if possible
-                    motif = self._identify_tactical_motif(
+                    motif = self._identify_missed_tactic_motif(
                         move_data.get('fen_before', ''),
                         move_data.get('best_move', ''),
                         move_data.get('move', '')
@@ -72,13 +120,78 @@ class TacticalPatternDetector:
 
         return mistakes
 
-    def _identify_tactical_motif(
+    def _collect_defensive_mistakes(self, games: List[Dict]) -> List[Dict]:
+        """Collect instances where user fell for opponent's tactics."""
+        defensive_errors = []
+
+        for game in games:
+            if not game.get('analyzed'):
+                continue
+
+            game_id = game.get('_id') or game.get('game_id')
+            moves = game.get('moves', [])
+            username = game.get('username', '').lower()
+            white_player = game.get('white', {}).get('username', '').lower()
+
+            for i, move_data in enumerate(moves):
+                # Check if opponent's next move causes a big eval swing
+                if i + 1 >= len(moves):
+                    continue
+
+                next_move = moves[i + 1]
+
+                # Determine if current move is user's move
+                move_num = move_data.get('move_number', 0)
+                is_white_move = (move_num % 1) == 0.5 if move_num > 0 else True
+                is_user_move = (is_white_move and username == white_player) or \
+                               (not is_white_move and username != white_player)
+
+                # Only track opponent's tactics against the user
+                if not is_user_move:
+                    continue
+
+                # Check if opponent's next move was devastating
+                opponent_move = next_move
+                if opponent_move.get('is_blunder') or opponent_move.get('centipawn_loss', 0) > 200:
+                    # This means opponent made a mistake, not us
+                    continue
+
+                # Check if user's position got much worse after opponent's move
+                eval_before = move_data.get('eval_after', 0)
+                eval_after_opponent = opponent_move.get('eval_after', 0)
+
+                # Calculate eval swing from user's perspective
+                eval_swing = abs(eval_before - eval_after_opponent) if eval_before else 0
+
+                if eval_swing > 200:  # Significant loss in position
+                    # Identify what tactic the opponent used
+                    motif = self._identify_defensive_weakness_motif(
+                        move_data.get('fen_after', ''),
+                        opponent_move.get('move', ''),
+                        move_data.get('move', '')
+                    )
+
+                    defensive_errors.append({
+                        'game_id': game_id,
+                        'move_number': opponent_move.get('move_number'),
+                        'fen': move_data.get('fen_after'),
+                        'user_move': move_data.get('move'),
+                        'opponent_move': opponent_move.get('move'),
+                        'san': opponent_move.get('san'),
+                        'eval_loss': int(eval_swing),
+                        'motif': motif,
+                        'date': game.get('date')
+                    })
+
+        return defensive_errors
+
+    def _identify_missed_tactic_motif(
         self,
         fen: str,
         best_move: str,
         played_move: str
     ) -> Optional[str]:
-        """Identify the tactical motif in a position.
+        """Identify the tactical motif the user missed.
 
         Args:
             fen: Position FEN
@@ -89,18 +202,30 @@ class TacticalPatternDetector:
             Name of tactical motif or None
         """
         if not fen or not best_move:
-            return None
+            return 'tactical_miss'
 
         try:
             board = chess.Board(fen)
             move = chess.Move.from_uci(best_move)
 
-            # Simple heuristics for common motifs
+            # Check for various tactical motifs in priority order
+            if self._is_back_rank_mate(board, move):
+                return 'back_rank_mate'
             if self._is_fork_position(board, move):
                 return 'fork'
+            if self._is_discovered_check(board, move):
+                return 'discovered_check'
+            if self._is_discovered_attack(board, move):
+                return 'discovered_attack'
+            if self._is_skewer_position(board, move):
+                return 'skewer'
             if self._is_pin_position(board, move):
                 return 'pin'
-            if self._is_hanging_piece(board, played_move):
+            if self._is_removal_of_defender(board, move):
+                return 'removal_of_defender'
+            if self._is_trapped_piece_tactic(board, move):
+                return 'trapped_piece'
+            if played_move and self._is_hanging_piece(board, played_move):
                 return 'hanging_piece'
             if self._is_tactical_blow(board, move):
                 return 'tactical_combination'
@@ -109,8 +234,57 @@ class TacticalPatternDetector:
             return 'tactical_miss'
 
         except Exception as e:
-            print(f"Error identifying motif: {e}")
+            print(f"Error identifying missed tactic motif: {e}")
             return 'tactical_miss'
+
+    def _identify_defensive_weakness_motif(
+        self,
+        fen: str,
+        opponent_move: str,
+        user_move: str
+    ) -> Optional[str]:
+        """Identify what tactical weakness the opponent exploited.
+
+        Args:
+            fen: Position FEN after user's move
+            opponent_move: Opponent's move that punished user
+            user_move: User's move that created the weakness
+
+        Returns:
+            Name of defensive weakness
+        """
+        if not fen or not opponent_move:
+            return 'tactical'
+
+        try:
+            board = chess.Board(fen)
+            opp_move = chess.Move.from_uci(opponent_move)
+
+            # Check what tactic opponent used
+            if self._is_fork_position(board, opp_move):
+                return 'fork'
+            if self._is_discovered_check(board, opp_move):
+                return 'discovered_check'
+            if self._is_discovered_attack(board, opp_move):
+                return 'discovered_attack'
+            if self._is_skewer_position(board, opp_move):
+                return 'skewer'
+            if self._is_pin_position(board, opp_move):
+                return 'pin'
+            if self._is_back_rank_mate(board, opp_move):
+                return 'back_rank_mate'
+            if user_move and self._is_hanging_piece(board, user_move):
+                return 'hanging'
+            if self._is_double_attack(board, opp_move):
+                return 'double_attack'
+            if self._is_trapped_piece_tactic(board, opp_move):
+                return 'trapped_piece'
+
+            return 'tactical'
+
+        except Exception as e:
+            print(f"Error identifying defensive weakness: {e}")
+            return 'tactical'
 
     def _is_fork_position(self, board: chess.Board, move: chess.Move) -> bool:
         """Check if move creates a fork."""
@@ -194,13 +368,222 @@ class TacticalPatternDetector:
         except:
             return False
 
-    def _aggregate_patterns(self, mistakes: List[Dict]) -> List[Dict]:
-        """Group similar tactical patterns together."""
+    def _is_discovered_check(self, board: chess.Board, move: chess.Move) -> bool:
+        """Check if move creates a discovered check."""
+        try:
+            piece = board.piece_at(move.from_square)
+            if not piece:
+                return False
+
+            # Make the move
+            board_copy = board.copy()
+            board_copy.push(move)
+
+            # Check if opponent is in check and the piece that moved is not giving check
+            if board_copy.is_check():
+                # Find if check is from a piece other than the one that moved
+                checkers = board_copy.checkers()
+                if move.to_square not in checkers:
+                    return True
+
+            return False
+        except:
+            return False
+
+    def _is_discovered_attack(self, board: chess.Board, move: chess.Move) -> bool:
+        """Check if move creates a discovered attack (not check)."""
+        try:
+            piece = board.piece_at(move.from_square)
+            if not piece:
+                return False
+
+            board_copy = board.copy()
+            board_copy.push(move)
+
+            # Look for pieces on the line of the move that now attack valuable targets
+            enemy_color = not piece.color
+
+            # Check if any friendly piece behind the moved piece now attacks something valuable
+            for square in chess.SQUARES:
+                attacker = board_copy.piece_at(square)
+                if attacker and attacker.color == piece.color and square != move.to_square:
+                    if attacker.piece_type in [chess.BISHOP, chess.ROOK, chess.QUEEN]:
+                        attacks = board_copy.attacks(square)
+                        for target_square in attacks:
+                            target = board_copy.piece_at(target_square)
+                            if target and target.color == enemy_color:
+                                if target.piece_type in [chess.QUEEN, chess.ROOK]:
+                                    # Check if this attack wasn't possible before the move
+                                    if not board.attacks(square) or target_square not in board.attacks(square):
+                                        return True
+
+            return False
+        except:
+            return False
+
+    def _is_skewer_position(self, board: chess.Board, move: chess.Move) -> bool:
+        """Check if move creates a skewer (attacking through valuable piece to another)."""
+        try:
+            piece = board.piece_at(move.from_square)
+            if not piece or piece.piece_type not in [chess.BISHOP, chess.ROOK, chess.QUEEN]:
+                return False
+
+            board_copy = board.copy()
+            board_copy.push(move)
+
+            # Check if we're attacking a valuable piece with something behind it
+            attacks = board_copy.attacks(move.to_square)
+            enemy_color = not piece.color
+
+            for attacked_square in attacks:
+                attacked_piece = board_copy.piece_at(attacked_square)
+                if attacked_piece and attacked_piece.color == enemy_color:
+                    if attacked_piece.piece_type in [chess.QUEEN, chess.ROOK, chess.KING]:
+                        # Check if there's a piece behind it on the same line
+                        direction = self._get_direction(move.to_square, attacked_square)
+                        if direction:
+                            behind_square = attacked_square + direction
+                            if chess.square_is_valid(behind_square):
+                                behind_piece = board_copy.piece_at(behind_square)
+                                if behind_piece and behind_piece.color == enemy_color:
+                                    return True
+
+            return False
+        except:
+            return False
+
+    def _is_back_rank_mate(self, board: chess.Board, move: chess.Move) -> bool:
+        """Check if move creates a back rank mate threat or delivers mate."""
+        try:
+            board_copy = board.copy()
+            board_copy.push(move)
+
+            # Check if it's mate
+            if board_copy.is_checkmate():
+                # Check if king is on back rank
+                enemy_king_square = board_copy.king(not board.turn)
+                if enemy_king_square:
+                    rank = chess.square_rank(enemy_king_square)
+                    if rank == 0 or rank == 7:
+                        return True
+
+            return False
+        except:
+            return False
+
+    def _is_removal_of_defender(self, board: chess.Board, move: chess.Move) -> bool:
+        """Check if move removes a defender of a valuable piece."""
+        try:
+            # Check if the move captures or deflects a defending piece
+            target = board.piece_at(move.to_square)
+            if not target:
+                return False
+
+            board_copy = board.copy()
+
+            # Before the move, check what the captured piece was defending
+            defending = []
+            for square in chess.SQUARES:
+                piece = board_copy.piece_at(square)
+                if piece and piece.color == target.color:
+                    if board_copy.is_attacked_by(target.color, square):
+                        if piece.piece_type in [chess.QUEEN, chess.ROOK]:
+                            defending.append(square)
+
+            # After the move, check if those pieces are now undefended
+            board_copy.push(move)
+            for defended_square in defending:
+                if not board_copy.is_attacked_by(target.color, defended_square):
+                    return True
+
+            return False
+        except:
+            return False
+
+    def _is_trapped_piece_tactic(self, board: chess.Board, move: chess.Move) -> bool:
+        """Check if move traps an opponent's piece."""
+        try:
+            board_copy = board.copy()
+            board_copy.push(move)
+
+            enemy_color = not board.turn
+
+            # Check if any enemy piece has no safe squares
+            for square in chess.SQUARES:
+                piece = board_copy.piece_at(square)
+                if piece and piece.color == enemy_color:
+                    if piece.piece_type in [chess.QUEEN, chess.ROOK, chess.KNIGHT, chess.BISHOP]:
+                        # Check if piece has any safe moves
+                        has_safe_move = False
+                        for legal_move in board_copy.legal_moves:
+                            if legal_move.from_square == square:
+                                temp_board = board_copy.copy()
+                                temp_board.push(legal_move)
+                                if not temp_board.is_attacked_by(not enemy_color, legal_move.to_square):
+                                    has_safe_move = True
+                                    break
+
+                        if not has_safe_move and board_copy.is_attacked_by(not enemy_color, square):
+                            return True
+
+            return False
+        except:
+            return False
+
+    def _is_double_attack(self, board: chess.Board, move: chess.Move) -> bool:
+        """Check if move attacks two pieces simultaneously."""
+        try:
+            board_copy = board.copy()
+            board_copy.push(move)
+
+            attacks = board_copy.attacks(move.to_square)
+            enemy_color = not board.turn
+            valuable_attacks = 0
+
+            for square in attacks:
+                target = board_copy.piece_at(square)
+                if target and target.color == enemy_color:
+                    if target.piece_type in [chess.QUEEN, chess.ROOK, chess.KNIGHT, chess.BISHOP]:
+                        valuable_attacks += 1
+
+            return valuable_attacks >= 2
+        except:
+            return False
+
+    def _get_direction(self, from_square: int, to_square: int) -> Optional[int]:
+        """Get the direction between two squares."""
+        try:
+            file_diff = chess.square_file(to_square) - chess.square_file(from_square)
+            rank_diff = chess.square_rank(to_square) - chess.square_rank(from_square)
+
+            if file_diff == 0:
+                return 8 if rank_diff > 0 else -8
+            elif rank_diff == 0:
+                return 1 if file_diff > 0 else -1
+            elif abs(file_diff) == abs(rank_diff):
+                file_step = 1 if file_diff > 0 else -1
+                rank_step = 8 if rank_diff > 0 else -8
+                return file_step + rank_step
+
+            return None
+        except:
+            return None
+
+    def _aggregate_patterns(self, mistakes: List[Dict], pattern_prefix: str = 'missed_') -> List[Dict]:
+        """Group similar tactical patterns together.
+
+        Args:
+            mistakes: List of tactical mistakes/errors
+            pattern_prefix: Prefix for pattern keys ('missed_' or 'fell_for_')
+
+        Returns:
+            List of aggregated patterns with human-readable descriptions
+        """
         grouped = defaultdict(list)
 
         for mistake in mistakes:
             motif = mistake.get('motif', 'unknown')
-            key = f"missed_{motif}"
+            key = f"{pattern_prefix}{motif}"
             grouped[key].append(mistake)
 
         result = []
@@ -218,25 +601,55 @@ class TacticalPatternDetector:
             first_seen = min(dates) if dates else None
             last_seen = max(dates) if dates else None
 
+            # Get human-readable description
+            description = self._get_human_readable_description(pattern_key, len(examples))
+
             result.append({
                 'pattern_type': 'tactical',
                 'pattern_subtype': pattern_key,
+                'description': description,  # Add human-readable description
                 'frequency': len(examples),
                 'severity': severity,
                 'avg_eval_loss': round(avg_eval_loss, 1),
                 'examples': examples[:5],  # Keep top 5 examples
                 'first_seen': first_seen,
                 'last_seen': last_seen,
-                'recommendation': self._get_recommendation(pattern_key, len(examples), severity)
+                'recommendation': self._get_recommendation(pattern_key, len(examples), severity),
+                'metadata': {
+                    'pattern_category': 'offensive' if pattern_prefix == 'missed_' else 'defensive',
+                    'avg_eval_loss': round(avg_eval_loss, 1)
+                }
             })
 
         # Sort by impact (severity × frequency)
         return sorted(result, key=lambda x: x['severity'] * x['frequency'], reverse=True)
 
+    def _get_human_readable_description(self, pattern_key: str, count: int) -> str:
+        """Get human-readable description for a pattern.
+
+        Args:
+            pattern_key: Pattern identifier (e.g., 'missed_fork', 'fell_for_pin')
+            count: Frequency count
+
+        Returns:
+            Human-readable description
+        """
+        template = self.pattern_descriptions.get(pattern_key)
+        if template:
+            return template.format(count=count)
+
+        # Fallback: Create generic description from pattern key
+        parts = pattern_key.split('_')
+        if len(parts) >= 2:
+            action = ' '.join(parts[:-1])
+            motif = parts[-1].replace('_', ' ')
+            return f"{action.capitalize()} {motif} {count} times"
+
+        return f"{pattern_key} ({count} times)"
+
     def _get_recommendation(self, pattern_key: str, frequency: int, severity: float) -> str:
         """Generate recommendation based on pattern."""
-        motif = pattern_key.replace('missed_', '').replace('_', ' ')
-
+        # Determine urgency level
         if severity > 0.7:
             urgency = "Critical"
         elif severity > 0.4:
@@ -244,7 +657,27 @@ class TacticalPatternDetector:
         else:
             urgency = "Moderate"
 
-        return (
-            f"{urgency}: You're missing {motif} tactics in {frequency} games. "
-            f"Practice {motif} puzzles to improve your tactical vision."
-        )
+        # Check if it's offensive (missed) or defensive (fell for) pattern
+        if pattern_key.startswith('missed_'):
+            motif = pattern_key.replace('missed_', '').replace('_', ' ')
+            return (
+                f"{urgency}: You're missing {motif} tactics frequently ({frequency} times). "
+                f"Practice {motif} puzzles to sharpen your tactical vision."
+            )
+        elif pattern_key.startswith('fell_for_'):
+            motif = pattern_key.replace('fell_for_', '').replace('_', ' ')
+            return (
+                f"{urgency}: You're vulnerable to {motif} attacks ({frequency} times). "
+                f"Study defensive techniques and be more alert to {motif} threats."
+            )
+        elif pattern_key.startswith('left_piece_'):
+            return (
+                f"{urgency}: You're leaving pieces undefended too often ({frequency} times). "
+                f"Always check if your pieces are protected before moving."
+            )
+        else:
+            motif = pattern_key.replace('_', ' ')
+            return (
+                f"{urgency}: Pattern detected: {motif} ({frequency} occurrences). "
+                f"Review these positions to improve."
+            )
