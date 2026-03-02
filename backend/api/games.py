@@ -7,6 +7,7 @@ from database import get_db, get_mongodb
 from models import User, Job
 from auth.dependencies import get_current_user
 from tasks import import_games_task
+from constants import PLATFORM_CHESS_COM, PLATFORM_LICHESS, VALID_PLATFORMS
 import uuid
 
 router = APIRouter()
@@ -14,7 +15,7 @@ router = APIRouter()
 
 class ImportGamesRequest(BaseModel):
     """Import games request model."""
-    platform: str  # "chess.com" or "lichess"
+    platform: str  # PLATFORM_CHESS_COM or PLATFORM_LICHESS
     limit: int = 500
     username: Optional[str] = None
 
@@ -34,14 +35,14 @@ async def import_games(
 ):
     """Start game import job."""
     # Validate platform
-    if request.platform not in ["chess.com", "lichess"]:
+    if request.platform not in VALID_PLATFORMS:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Platform must be 'chess.com' or 'lichess'"
+            detail=f"Platform must be '{PLATFORM_CHESS_COM}' or '{PLATFORM_LICHESS}'"
         )
 
     # Get username
-    if request.platform == "chess.com":
+    if request.platform == PLATFORM_CHESS_COM:
         username = request.username or current_user.chess_com_username
         access_token = current_user.chess_com_access_token
     else:

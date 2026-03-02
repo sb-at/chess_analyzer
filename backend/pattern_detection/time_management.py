@@ -95,6 +95,7 @@ class TimeManagementDetector:
             patterns.append({
                 'pattern_type': 'time_management',
                 'pattern_subtype': 'time_pressure_accuracy_drop',
+                'description': f"Accuracy drops {accuracy_drop:.1f}% under time pressure",
                 'frequency': len(accuracy_by_time['pressure']),
                 'severity': severity,
                 'metadata': {
@@ -128,11 +129,15 @@ class TimeManagementDetector:
             patterns.append({
                 'pattern_type': 'time_management',
                 'pattern_subtype': 'frequent_time_trouble',
+                'description': f"Frequent time trouble in {len(time_pressure_games)} games",
                 'frequency': len(time_pressure_games),
                 'severity': severity,
                 'first_seen': first_seen,
                 'last_seen': last_seen,
                 'examples': time_pressure_games[:5],
+                'metadata': {
+                    'games_with_time_trouble': len(time_pressure_games)
+                },
                 'recommendation': (
                     f"You frequently get into severe time trouble ({len(time_pressure_games)} games). "
                     "Consider faster opening play, longer time controls, or time management training."

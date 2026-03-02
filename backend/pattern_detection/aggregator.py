@@ -1,6 +1,6 @@
 """Pattern aggregation and analysis orchestration."""
 from typing import List, Dict
-from datetime import datetime
+from datetime import datetime, timezone
 from pattern_detection.tactical import TacticalPatternDetector
 from pattern_detection.opening import OpeningPatternDetector
 from pattern_detection.time_management import TimeManagementDetector
@@ -59,7 +59,7 @@ class PatternAggregator:
             'total_patterns': len(prioritized),
             'analyzed_games_count': len(games),
             'stats': stats,
-            'analyzed_at': datetime.utcnow().isoformat()
+            'analyzed_at': datetime.now(timezone.utc).isoformat()
         }
 
     def _calculate_overall_stats(self, games: List[Dict], patterns: List[Dict]) -> Dict:

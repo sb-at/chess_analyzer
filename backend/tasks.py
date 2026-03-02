@@ -7,7 +7,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from celery import Celery
 from config import get_settings
-from datetime import datetime
+from datetime import datetime, timezone
+from constants import PLATFORM_CHESS_COM, PLATFORM_LICHESS
 
 settings = get_settings()
 
@@ -47,60 +48,103 @@ def import_games_task(self, job_id: str, user_id: str, platform: str, username: 
         return {"error": "Job not found"}
 
     job.status = "running"
-    job.started_at = datetime.utcnow()
+    job.started_at = datetime.now(timezone.utc)
     db.commit()
 
     try:
-        # If filtering by time control, fetch more games to account for filtering
-        fetch_limit = limit * 3 if time_control_filter else limit
-
-        # Import games based on platform
-        if platform == "chess.com":
-            client = ChessComClient(username)
-            games = asyncio.run(client.import_recent_games(limit=fetch_limit))
-        else:  # lichess
-            client = LichessClient(username, access_token)
-            games = asyncio.run(client.import_recent_games(limit=fetch_limit))
-
-        # Filter games by time control if specified
-        if time_control_filter:
-            filtered_games = []
-            for game in games:
-                if game.get("time_control") == time_control_filter:
-                    filtered_games.append(game)
-                    if len(filtered_games) >= limit:
-                        break
-            games = filtered_games
-
-            # Log filtering results
-            print(f"Filtering games by time control: {time_control_filter}")
-            print(f"Filtered to {len(games)} games matching time control")
-
-        # Save games to MongoDB (using sync client)
         mongodb = get_mongodb_sync()
         games_collection = mongodb.games
 
+        # Step 1: Check for existing games in database
+        # Query by platform and player name (games where user played as white or black)
+        existing_query = {
+            "platform": platform,
+            "$or": [
+                {"white_player": username},
+                {"black_player": username}
+            ]
+        }
+        if time_control_filter:
+            existing_query["time_control"] = time_control_filter
+
+        existing_games = list(games_collection.find(existing_query).sort("date", -1).limit(limit))
+        existing_count = len(existing_games)
+        existing_game_ids = {game.get("game_id") for game in existing_games}
+
+        print(f"Found {existing_count} existing games in database for {username} on {platform}")
+
+        # Step 2: Fetch recent games from platform to check for new ones
+        # Always fetch to check for new games, but limit the fetch size
+        fetch_limit = max(limit, 100)  # Fetch at least 100 to check for new games
+        if time_control_filter:
+            fetch_limit = limit * 3  # Need more to account for time control filtering
+
+        if platform == PLATFORM_CHESS_COM:
+            client = ChessComClient(username)
+            fetched_games = asyncio.run(client.import_recent_games(limit=fetch_limit))
+        else:  # PLATFORM_LICHESS
+            client = LichessClient(username, access_token)
+            fetched_games = asyncio.run(client.import_recent_games(limit=fetch_limit))
+
+        # Step 3: Identify new games (not in database)
+        new_games = []
+        for game in fetched_games:
+            if game.get("game_id") not in existing_game_ids:
+                new_games.append(game)
+
+        # Filter new games by time control if specified
+        if time_control_filter:
+            new_games = [g for g in new_games if g.get("time_control") == time_control_filter]
+
+        new_count = len(new_games)
+        print(f"Found {new_count} new games on platform")
+
+        # Step 4: Decide which games to use
+        games_to_import = []
         total_imported = 0
         total_updated = 0
 
-        for i, game_data in enumerate(games):
+        if new_count >= limit:
+            # We have enough new games - use only new games
+            games_to_import = new_games[:limit]
+            print(f"Using {len(games_to_import)} new games for analysis")
+        elif new_count > 0:
+            # We have some new games but not enough - combine with existing
+            games_to_import = new_games
+            needed_from_existing = limit - new_count
+            games_to_import.extend(existing_games[:needed_from_existing])
+            print(f"Using {new_count} new games + {needed_from_existing} existing games")
+        else:
+            # No new games - use existing games if we have enough
+            if existing_count >= limit:
+                games_to_import = existing_games[:limit]
+                print(f"No new games found. Using {len(games_to_import)} existing games")
+            else:
+                # Not enough games total
+                games_to_import = existing_games
+                print(f"Only {existing_count} games available (requested {limit})")
+
+        # Step 5: Import new games to MongoDB
+        for i, game_data in enumerate(new_games):
             # Add user_id and job_id to game data
             game_data["user_id"] = user_id  # Can be None for public analysis
             game_data["job_id"] = job_id  # Always store job_id for retrieval
-            game_data["created_at"] = datetime.utcnow()
+            game_data["created_at"] = datetime.now(timezone.utc)
 
             # Upsert game based on unique index (platform + game_id)
-            # The unique index is on (platform, game_id), so we match on that
             query = {
                 "platform": game_data["platform"],
                 "game_id": game_data["game_id"]
             }
 
+            # Remove first_imported from game_data to avoid conflict with $setOnInsert
+            game_data_copy = {k: v for k, v in game_data.items() if k != "first_imported"}
+
             result = games_collection.update_one(
                 query,
                 {
-                    "$set": game_data,
-                    "$setOnInsert": {"first_imported": datetime.utcnow()}
+                    "$set": game_data_copy,
+                    "$setOnInsert": {"first_imported": datetime.now(timezone.utc)}
                 },
                 upsert=True
             )
@@ -111,11 +155,24 @@ def import_games_task(self, job_id: str, user_id: str, platform: str, username: 
                 total_updated += 1
 
             # Update progress (50% for import, 50% for analysis)
-            progress = int((i + 1) / len(games) * 50)
+            progress = int((i + 1) / len(new_games) * 25) if new_games else 0
             job.progress = progress
-            job.processed_items = i + 1
-            job.total_items = len(games)
             db.commit()
+
+        # Update existing games with job_id so they're associated with this analysis
+        for game in existing_games:
+            if game.get("_id"):
+                games_collection.update_one(
+                    {"_id": game["_id"]},
+                    {"$set": {"job_id": job_id}}
+                )
+
+        # Use games_to_import for the rest of the analysis
+        games = games_to_import
+        job.processed_items = len(games)
+        job.total_items = len(games)
+        job.progress = 25
+        db.commit()
 
         # If this is a full_analysis job, trigger analysis automatically
         if job.job_type == "full_analysis":
@@ -123,38 +180,48 @@ def import_games_task(self, job_id: str, user_id: str, platform: str, username: 
             from analysis.stockfish_analyzer_fast import FastStockfishAnalyzer
 
             analyzed_count = 0
+            skipped_count = 0
             for i, game in enumerate(games):
-                # Get the game from MongoDB to get its _id
+                # Get the game from MongoDB - it should have job_id now
+                # For existing games, we just updated them with job_id
+                # For new games, they were imported with job_id
                 saved_game = games_collection.find_one({
-                    "platform": game["platform"],
-                    "game_id": game["game_id"],
-                    "job_id": job_id
+                    "platform": game.get("platform"),
+                    "game_id": game.get("game_id")
                 })
 
-                if saved_game and not saved_game.get('analyzed'):
-                    try:
-                        with FastStockfishAnalyzer(depth=10) as analyzer:
-                            analysis = analyzer.analyze_game_fast(saved_game['pgn'], skip_opening_moves=8)
+                if saved_game:
+                    if saved_game.get('analyzed'):
+                        # Game already analyzed - skip Stockfish analysis
+                        skipped_count += 1
+                        print(f"Skipping already analyzed game: {saved_game.get('game_id')}")
+                    else:
+                        # Game needs analysis
+                        try:
+                            with FastStockfishAnalyzer(depth=10) as analyzer:
+                                analysis = analyzer.analyze_game_fast(saved_game['pgn'], skip_opening_moves=8)
 
-                        games_collection.update_one(
-                            {"_id": saved_game["_id"]},
-                            {
-                                "$set": {
-                                    "moves": analysis['moves_analysis'],
-                                    "stats": analysis['stats'],
-                                    "analyzed": True,
-                                    "analyzed_at": datetime.utcnow()
+                            games_collection.update_one(
+                                {"_id": saved_game["_id"]},
+                                {
+                                    "$set": {
+                                        "moves": analysis['moves_analysis'],
+                                        "stats": analysis['stats'],
+                                        "analyzed": True,
+                                        "analyzed_at": datetime.now(timezone.utc)
+                                    }
                                 }
-                            }
-                        )
-                        analyzed_count += 1
-                    except Exception as e:
-                        print(f"Error analyzing game: {e}")
+                            )
+                            analyzed_count += 1
+                        except Exception as e:
+                            print(f"Error analyzing game {saved_game.get('game_id')}: {e}")
 
-                # Update progress (50-90% for analysis)
-                progress = 50 + int((i + 1) / len(games) * 40)
+                # Update progress (25-90% for analysis)
+                progress = 25 + int((i + 1) / len(games) * 65)
                 job.progress = progress
                 db.commit()
+
+            print(f"Analysis complete: {analyzed_count} newly analyzed, {skipped_count} already analyzed")
 
             # Trigger pattern detection
             from pattern_detection import PatternAggregator
@@ -184,7 +251,7 @@ def import_games_task(self, job_id: str, user_id: str, platform: str, username: 
                         "last_seen": pattern_data.get('last_seen'),
                         "examples": pattern_data.get('examples'),
                         "metadata": pattern_data.get('metadata', {}),
-                        "created_at": datetime.utcnow()
+                        "created_at": datetime.now(timezone.utc)
                     }
                     patterns_collection.insert_one(pattern_doc)
 
@@ -192,7 +259,7 @@ def import_games_task(self, job_id: str, user_id: str, platform: str, username: 
 
         # Mark job as completed
         job.status = "completed"
-        job.completed_at = datetime.utcnow()
+        job.completed_at = datetime.now(timezone.utc)
         if job.job_type != "full_analysis":
             job.progress = 100
         job.job_metadata = {
@@ -214,7 +281,7 @@ def import_games_task(self, job_id: str, user_id: str, platform: str, username: 
         # Mark job as failed
         job.status = "failed"
         job.error_message = str(e)
-        job.completed_at = datetime.utcnow()
+        job.completed_at = datetime.now(timezone.utc)
         db.commit()
 
         raise
@@ -255,7 +322,7 @@ def analyze_game_task(self, game_id: str):
                     "moves": analysis['moves_analysis'],
                     "stats": analysis['stats'],
                     "analyzed": True,
-                    "analyzed_at": datetime.utcnow()
+                    "analyzed_at": datetime.now(timezone.utc)
                 }
             }
         )
@@ -290,7 +357,7 @@ def analyze_games_batch_task(self, job_id: str, user_id: str, limit: int = 100, 
         return {"error": "Job not found"}
 
     job.status = "running"
-    job.started_at = datetime.utcnow()
+    job.started_at = datetime.now(timezone.utc)
     db.commit()
 
     try:
@@ -312,7 +379,7 @@ def analyze_games_batch_task(self, job_id: str, user_id: str, limit: int = 100, 
 
         if not games:
             job.status = "completed"
-            job.completed_at = datetime.utcnow()
+            job.completed_at = datetime.now(timezone.utc)
             job.progress = 100
             db.commit()
             return {"status": "no_games_to_analyze"}
@@ -350,7 +417,7 @@ def analyze_games_batch_task(self, job_id: str, user_id: str, limit: int = 100, 
             db.commit()
 
         job.status = "completed"
-        job.completed_at = datetime.utcnow()
+        job.completed_at = datetime.now(timezone.utc)
         job.progress = 100
         db.commit()
 
@@ -362,7 +429,7 @@ def analyze_games_batch_task(self, job_id: str, user_id: str, limit: int = 100, 
     except Exception as e:
         job.status = "failed"
         job.error_message = str(e)
-        job.completed_at = datetime.utcnow()
+        job.completed_at = datetime.now(timezone.utc)
         db.commit()
         raise
 
@@ -386,7 +453,7 @@ def analyze_user_patterns_task(self, job_id: str, user_id: str):
         return {"error": "Job not found"}
 
     job.status = "running"
-    job.started_at = datetime.utcnow()
+    job.started_at = datetime.now(timezone.utc)
     db.commit()
 
     try:
@@ -401,7 +468,7 @@ def analyze_user_patterns_task(self, job_id: str, user_id: str):
 
         if len(games) < 5:
             job.status = "completed"
-            job.completed_at = datetime.utcnow()
+            job.completed_at = datetime.now(timezone.utc)
             job.job_metadata = {
                 **job.job_metadata,
                 "error": "Insufficient analyzed games (minimum 5 required)"
@@ -435,7 +502,7 @@ def analyze_user_patterns_task(self, job_id: str, user_id: str):
         db.commit()
 
         job.status = "completed"
-        job.completed_at = datetime.utcnow()
+        job.completed_at = datetime.now(timezone.utc)
         job.progress = 100
         job.job_metadata = {
             **job.job_metadata,
@@ -453,7 +520,7 @@ def analyze_user_patterns_task(self, job_id: str, user_id: str):
     except Exception as e:
         job.status = "failed"
         job.error_message = str(e)
-        job.completed_at = datetime.utcnow()
+        job.completed_at = datetime.now(timezone.utc)
         db.commit()
         raise
 

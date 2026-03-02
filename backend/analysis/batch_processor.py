@@ -3,7 +3,7 @@ import asyncio
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from typing import List, Dict, Optional
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 from analysis.stockfish_analyzer import StockfishAnalyzer
 from config import get_settings
 
@@ -102,7 +102,7 @@ class BatchGameAnalyzer:
                 'moves': analysis['moves_analysis'],
                 'stats': analysis['stats'],
                 'analyzed': True,
-                'analyzed_at': datetime.utcnow()
+                'analyzed_at': datetime.now(timezone.utc)
             }
 
             # Cache result

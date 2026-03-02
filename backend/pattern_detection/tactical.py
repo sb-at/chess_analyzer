@@ -673,11 +673,11 @@ class TacticalPatternDetector:
         elif pattern_key.startswith('left_piece_'):
             return (
                 f"{urgency}: You're leaving pieces undefended too often ({frequency} times). "
-                f"Always check if your pieces are protected before moving."
+                "Always check if your pieces are protected before moving."
             )
         else:
             motif = pattern_key.replace('_', ' ')
             return (
                 f"{urgency}: Pattern detected: {motif} ({frequency} occurrences). "
-                f"Review these positions to improve."
+                "Review these positions to improve."
             )

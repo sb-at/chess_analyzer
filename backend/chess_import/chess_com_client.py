@@ -5,19 +5,21 @@ from typing import List, Optional
 from datetime import datetime
 import chess.pgn
 from io import StringIO
+from constants import PLATFORM_CHESS_COM
 
 
 class ChessComClient:
     """Client for Chess.com Public API."""
 
-    def __init__(self, username: str):
+    def __init__(self, username: str, verify_ssl: bool = False):
         self.username = username.lower()
         self.base_url = "https://api.chess.com/pub"
         self.rate_limit_delay = 0.5  # 2 requests per second max
+        self.verify_ssl = verify_ssl  # Disabled by default to avoid SSL cert issues
 
     async def get_player_profile(self) -> dict:
         """Get player profile information."""
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        async with httpx.AsyncClient(timeout=30.0, verify=self.verify_ssl) as client:
             response = await client.get(
                 f"{self.base_url}/player/{self.username}"
             )
@@ -27,7 +29,7 @@ class ChessComClient:
     async def get_game_archives(self) -> List[str]:
         """Get list of monthly archive URLs."""
         await asyncio.sleep(self.rate_limit_delay)
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        async with httpx.AsyncClient(timeout=30.0, verify=self.verify_ssl) as client:
             response = await client.get(
                 f"{self.base_url}/player/{self.username}/games/archives"
             )
@@ -37,7 +39,7 @@ class ChessComClient:
     async def get_games_from_archive(self, archive_url: str) -> List[dict]:
         """Fetch games from a specific monthly archive."""
         await asyncio.sleep(self.rate_limit_delay)
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        async with httpx.AsyncClient(timeout=30.0, verify=self.verify_ssl) as client:
             response = await client.get(archive_url)
             response.raise_for_status()
             return response.json().get("games", [])
@@ -121,15 +123,15 @@ class ChessComClient:
             opening_name = None
             opening_eco = None
             if pgn:
-                opening_name = pgn.headers.get("ECO", None)
-                opening_eco = pgn.headers.get("ECOUrl", None)
+                opening_eco = pgn.headers.get("ECO", None)
+                opening_name = pgn.headers.get("Opening", None)
 
             # Extract time control
             time_control = game_data.get("time_control", "")
             time_class = game_data.get("time_class", "")
 
             return {
-                "platform": "chess.com",
+                "platform": PLATFORM_CHESS_COM,
                 "game_id": game_data.get("url", "").split("/")[-1],
                 "pgn": pgn_text,
                 "date": datetime.fromtimestamp(game_data.get("end_time", 0)),

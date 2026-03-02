@@ -1,7 +1,7 @@
 """Lichess API client for game import."""
 import httpx
 from typing import AsyncIterator, List, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 import json
 import chess.pgn
 from io import StringIO
@@ -114,17 +114,29 @@ class LichessClient:
             # Get PGN
             pgn_text = game_data.get("pgn", "")
 
-            # Parse opening info
+            # Parse opening info from API response (primary source)
             opening = game_data.get("opening", {})
             opening_name = opening.get("name")
             opening_eco = opening.get("eco")
+
+            # Fallback: Parse from PGN headers if not in API response
+            if not opening_name or not opening_eco:
+                try:
+                    pgn = chess.pgn.read_game(StringIO(pgn_text))
+                    if pgn:
+                        if not opening_eco:
+                            opening_eco = pgn.headers.get("ECO")
+                        if not opening_name:
+                            opening_name = pgn.headers.get("Opening")
+                except Exception:
+                    pass  # If PGN parsing fails, keep the values from API
 
             # Parse timestamp
             created_at = game_data.get("createdAt", 0)
             if created_at:
                 date = datetime.fromtimestamp(created_at / 1000)  # Lichess uses milliseconds
             else:
-                date = datetime.utcnow()
+                date = datetime.now(timezone.utc)
 
             # Get ratings
             white_rating = game_data.get("players", {}).get("white", {}).get("rating")

@@ -59,6 +59,10 @@ async def init_mongodb_indexes():
     await games.create_index([("time_control", 1)])
     await games.create_index([("platform", 1), ("time_control", 1)])  # For time control filtering
     await games.create_index([("job_id", 1), ("time_control", 1)])  # For job-specific filtering
+    await games.create_index([("platform", 1), ("white_player", 1), ("date", -1)])  # For checking existing games by player
+    await games.create_index([("platform", 1), ("black_player", 1), ("date", -1)])  # For checking existing games by player
+    await games.create_index([("platform", 1), ("white_player", 1), ("time_control", 1), ("date", -1)])  # With time control
+    await games.create_index([("platform", 1), ("black_player", 1), ("time_control", 1), ("date", -1)])  # With time control
 
     # Analysis cache indexes
     cache = mongodb.analysis_cache
@@ -78,6 +82,10 @@ def init_mongodb_indexes_sync():
     games.create_index([("time_control", 1)])
     games.create_index([("platform", 1), ("time_control", 1)])  # For time control filtering
     games.create_index([("job_id", 1), ("time_control", 1)])  # For job-specific filtering
+    games.create_index([("platform", 1), ("white_player", 1), ("date", -1)])  # For checking existing games by player
+    games.create_index([("platform", 1), ("black_player", 1), ("date", -1)])  # For checking existing games by player
+    games.create_index([("platform", 1), ("white_player", 1), ("time_control", 1), ("date", -1)])  # With time control
+    games.create_index([("platform", 1), ("black_player", 1), ("time_control", 1), ("date", -1)])  # With time control
 
     # Analysis cache indexes
     cache = mongodb_sync.analysis_cache

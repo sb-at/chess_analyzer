@@ -116,6 +116,7 @@ class OpeningPatternDetector:
                     'pattern_type': 'opening',
                     'pattern_subtype': 'poor_opening_results',
                     'opening_name': opening,
+                    'description': f"Poor results in {opening} ({win_rate:.1f}% win rate)",
                     'frequency': total_games,
                     'win_rate': round(win_rate, 1),
                     'severity': severity,
@@ -153,10 +154,14 @@ class OpeningPatternDetector:
                     first_seen = min(data['dates']) if data['dates'] else None
                     last_seen = max(data['dates']) if data['dates'] else None
 
+                    # Create a descriptive title based on opening and move number
+                    description = f"Repeated mistake on move {move_num} in {opening}"
+
                     patterns.append({
                         'pattern_type': 'opening',
                         'pattern_subtype': 'repeated_opening_mistake',
                         'opening_name': opening,
+                        'description': description,
                         'move_number': move_num,
                         'frequency': len(mistakes),
                         'severity': severity,
@@ -164,9 +169,14 @@ class OpeningPatternDetector:
                         'first_seen': first_seen,
                         'last_seen': last_seen,
                         'examples': mistakes[:5],
+                        'metadata': {
+                            'opening_name': opening,
+                            'move_number': move_num,
+                            'avg_eval_loss': round(avg_eval_loss, 1)
+                        },
                         'recommendation': (
                             f"You consistently make mistakes on move {move_num} in {opening}. "
-                            f"Review the correct move and understand the key ideas."
+                            "Review the correct move and understand the key ideas."
                         )
                     })
 

@@ -3,6 +3,7 @@ import httpx
 from typing import Optional
 from fastapi import HTTPException
 from config import get_settings
+from constants import PLATFORM_CHESS_COM, PLATFORM_LICHESS
 
 settings = get_settings()
 
@@ -60,7 +61,7 @@ class ChessComOAuth:
         # Chess.com doesn't have a standard user info endpoint
         # We'll need to get username from the token response or use profile endpoint
         # For now, return basic structure
-        return {"platform": "chess.com"}
+        return {"platform": PLATFORM_CHESS_COM}
 
 
 class LichessOAuth:

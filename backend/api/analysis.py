@@ -7,6 +7,7 @@ from database import get_db
 from models import User, Job
 from auth.dependencies import get_current_user
 from tasks import analyze_games_batch_task, analyze_user_patterns_task, import_games_task
+from constants import PLATFORM_CHESS_COM, PLATFORM_LICHESS, VALID_PLATFORMS
 from bson import ObjectId
 import uuid
 import httpx
@@ -28,7 +29,7 @@ def serialize_mongo_doc(doc: Any) -> Any:
 
 class StartAnalysisRequest(BaseModel):
     """Start analysis request for any username (no auth required)."""
-    platform: str  # "lichess" or "chess.com"
+    platform: str  # PLATFORM_LICHESS or PLATFORM_CHESS_COM
     username: str
     limit: int = 10
     time_control: Optional[str] = None  # Optional time control filter
@@ -56,10 +57,10 @@ async def start_analysis(
     5. Returns results accessible via job_id
     """
     # Validate platform
-    if request.platform not in ["lichess", "chess.com"]:
+    if request.platform not in VALID_PLATFORMS:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Platform must be 'lichess' or 'chess.com'"
+            detail=f"Platform must be '{PLATFORM_LICHESS}' or '{PLATFORM_CHESS_COM}'"
         )
 
     if not request.username or not request.username.strip():
@@ -141,10 +142,10 @@ async def get_time_controls(request: GetTimeControlsRequest):
     import asyncio
 
     # Validate platform
-    if request.platform not in ["lichess", "chess.com"]:
+    if request.platform not in VALID_PLATFORMS:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Platform must be 'lichess' or 'chess.com'"
+            detail=f"Platform must be '{PLATFORM_LICHESS}' or '{PLATFORM_CHESS_COM}'"
         )
 
     if not request.username or not request.username.strip():
@@ -155,12 +156,12 @@ async def get_time_controls(request: GetTimeControlsRequest):
 
     try:
         # Get time controls based on platform
-        if request.platform == "chess.com":
+        if request.platform == PLATFORM_CHESS_COM:
             client = ChessComClient(request.username.strip())
             time_controls_dict, total_sampled = await client.get_time_controls_quick(
                 sample_size=request.sample_size
             )
-        else:  # lichess
+        else:  # PLATFORM_LICHESS
             client = LichessClient(request.username.strip(), token=None)
             time_controls_dict, total_sampled = await client.get_time_controls_quick(
                 sample_size=request.sample_size
@@ -263,12 +264,39 @@ async def get_analysis_results(
 
         response["patterns"] = patterns
 
-        # Get games count
+        # Get games for statistics
         games_collection = mongodb.games
-        games_count = await games_collection.count_documents({
+        games = await games_collection.find({
             "job_id": str(job.id)
-        })
-        response["games_analyzed"] = games_count
+        }).to_list(length=None)
+
+        response["games_analyzed"] = len(games)
+
+        # Debug: check if games have opening info
+        if games:
+            sample_game = games[0]
+            print(f"Sample game keys: {sample_game.keys()}")
+            print(f"Sample game opening_name: {sample_game.get('opening_name')}")
+            print(f"Sample game opening_eco: {sample_game.get('opening_eco')}")
+            print(f"Sample game user_color: {sample_game.get('user_color')}")
+
+        # Calculate opening statistics
+        try:
+            from utils.opening_stats import calculate_opening_statistics
+            opening_stats = calculate_opening_statistics(games)
+            print(f"Calculated opening stats: {opening_stats}")
+            response["opening_stats"] = opening_stats
+        except Exception as e:
+            print(f"Error calculating opening statistics: {e}")
+            import traceback
+            traceback.print_exc()
+            # Set empty opening stats if calculation fails
+            response["opening_stats"] = {
+                "white_openings": [],
+                "black_openings": [],
+                "total_white_games": 0,
+                "total_black_games": 0
+            }
 
     return response
 
