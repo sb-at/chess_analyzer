@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { Chess } from 'chess.js'
 import { Chessboard } from 'react-chessboard'
 
@@ -39,13 +39,53 @@ export default function InstanceViewer({
   const [currentIndex, setCurrentIndex] = useState(0)
   const [game, setGame] = useState<Chess | null>(null)
   const [showBestMove, setShowBestMove] = useState(false)
-  const [customSquareStyles, setCustomSquareStyles] = useState<Record<string, React.CSSProperties>>({})
+  // Stores green/red highlights after a move, or yellow/arrow for best move display
+  const [moveResultStyles, setMoveResultStyles] = useState<Record<string, React.CSSProperties>>({})
   const [customArrows, setCustomArrows] = useState<Array<[any, any]>>([])
   const [userTryMode, setUserTryMode] = useState(false)
   const [userMadeMove, setUserMadeMove] = useState(false)
+  const [moveWasBest, setMoveWasBest] = useState(false)
   const [touchStart, setTouchStart] = useState<number | null>(null)
+  // Click-to-select state
+  const [selectedSquare, setSelectedSquare] = useState<string | null>(null)
+  const [legalMoveSquares, setLegalMoveSquares] = useState<string[]>([])
 
   const currentInstance = instances[currentIndex]
+
+  // Merge move-result/best-move highlights with selection highlights
+  const customSquareStyles = useMemo(() => {
+    const styles: Record<string, React.CSSProperties> = { ...moveResultStyles }
+
+    if (selectedSquare) {
+      styles[selectedSquare] = {
+        backgroundColor: 'rgba(255, 200, 0, 0.7)',
+      }
+
+      legalMoveSquares.forEach((sq) => {
+        if (!styles[sq]) {
+          const piece = game?.get(sq as any)
+          if (piece) {
+            // Capture square — ring
+            styles[sq] = {
+              background: 'radial-gradient(circle, transparent 60%, rgba(0,0,0,0.25) 60%)',
+            }
+          } else {
+            // Empty square — dot
+            styles[sq] = {
+              background: 'radial-gradient(circle, rgba(0,0,0,0.18) 25%, transparent 25%)',
+            }
+          }
+        }
+      })
+    }
+
+    return styles
+  }, [moveResultStyles, selectedSquare, legalMoveSquares, game])
+
+  const clearSelection = () => {
+    setSelectedSquare(null)
+    setLegalMoveSquares([])
+  }
 
   // Initialize chess game when instance changes
   useEffect(() => {
@@ -55,10 +95,12 @@ export default function InstanceViewer({
       const chess = new Chess(currentInstance.fen)
       setGame(chess)
       setShowBestMove(false)
-      setCustomSquareStyles({})
+      setMoveResultStyles({})
       setCustomArrows([])
       setUserTryMode(false)
       setUserMadeMove(false)
+      setMoveWasBest(false)
+      clearSelection()
     } catch (error) {
       console.error('Error loading position:', error)
     }
@@ -93,13 +135,10 @@ export default function InstanceViewer({
     const touchEnd = e.changedTouches[0].clientX
     const diff = touchStart - touchEnd
 
-    // Swipe threshold
     if (Math.abs(diff) > 50) {
       if (diff > 0) {
-        // Swiped left - next
         handleNext()
       } else {
-        // Swiped right - previous
         handlePrevious()
       }
     }
@@ -126,13 +165,12 @@ export default function InstanceViewer({
 
     setShowBestMove(true)
     setUserTryMode(false)
+    clearSelection()
 
-    // Parse UCI move (e.g., "e2e4" -> from "e2" to "e4")
     const from = currentInstance.best_move.substring(0, 2)
     const to = currentInstance.best_move.substring(2, 4)
 
-    // Highlight the piece and destination
-    setCustomSquareStyles({
+    setMoveResultStyles({
       [from]: {
         backgroundColor: 'rgba(255, 170, 0, 0.6)',
         borderRadius: '50%',
@@ -142,54 +180,44 @@ export default function InstanceViewer({
       },
     })
 
-    // Draw arrow
     setCustomArrows([[from, to]])
   }
 
   const handleTryYourself = () => {
     setUserTryMode(true)
     setShowBestMove(false)
-    setCustomSquareStyles({})
+    setMoveResultStyles({})
     setCustomArrows([])
     setUserMadeMove(false)
+    setMoveWasBest(false)
+    clearSelection()
   }
 
-  const onDrop = (sourceSquare: string, targetSquare: string) => {
-    if (!userTryMode || !game) return false
+  // Shared move logic used by both drag-and-drop and click-to-move
+  const applyMove = (sourceSquare: string, targetSquare: string): boolean => {
+    if (!game) return false
 
     try {
-      // Try to make the move
       const move = game.move({
         from: sourceSquare,
         to: targetSquare,
-        promotion: 'q', // Always promote to queen for simplicity
+        promotion: 'q',
       })
 
       if (move) {
+        const isBestMove = currentInstance.best_move === `${sourceSquare}${targetSquare}`
         setUserMadeMove(true)
-        // Check if it's the best move
-        const userMoveUci = `${sourceSquare}${targetSquare}`
-        const isBestMove = currentInstance.best_move === userMoveUci
+        setMoveWasBest(isBestMove)
 
         if (isBestMove) {
-          // Highlight in green
-          setCustomSquareStyles({
-            [sourceSquare]: {
-              backgroundColor: 'rgba(0, 255, 0, 0.6)',
-            },
-            [targetSquare]: {
-              backgroundColor: 'rgba(0, 255, 0, 0.4)',
-            },
+          setMoveResultStyles({
+            [sourceSquare]: { backgroundColor: 'rgba(0, 255, 0, 0.6)' },
+            [targetSquare]: { backgroundColor: 'rgba(0, 255, 0, 0.4)' },
           })
         } else {
-          // Highlight in red (wrong move)
-          setCustomSquareStyles({
-            [sourceSquare]: {
-              backgroundColor: 'rgba(255, 0, 0, 0.6)',
-            },
-            [targetSquare]: {
-              backgroundColor: 'rgba(255, 0, 0, 0.4)',
-            },
+          setMoveResultStyles({
+            [sourceSquare]: { backgroundColor: 'rgba(255, 0, 0, 0.6)' },
+            [targetSquare]: { backgroundColor: 'rgba(255, 0, 0, 0.4)' },
           })
         }
 
@@ -197,8 +225,59 @@ export default function InstanceViewer({
       }
 
       return false
-    } catch (error) {
+    } catch {
       return false
+    }
+  }
+
+  // Drag-and-drop handler
+  const onDrop = (sourceSquare: string, targetSquare: string) => {
+    if (!userTryMode || userMadeMove || !game) return false
+    clearSelection()
+    return applyMove(sourceSquare, targetSquare)
+  }
+
+  // Click-to-select and click-to-move handler
+  const onSquareClick = (square: string) => {
+    if (!game || userMadeMove) return
+
+    // A piece is already selected
+    if (selectedSquare) {
+      // Clicked a legal destination — move
+      if (legalMoveSquares.includes(square)) {
+        if (userTryMode) {
+          applyMove(selectedSquare, square)
+        }
+        clearSelection()
+        return
+      }
+
+      // Re-clicked the selected square — deselect
+      if (square === selectedSquare) {
+        clearSelection()
+        return
+      }
+
+      // Clicked another piece of the same color — switch selection
+      const piece = game.get(square as any)
+      if (piece && piece.color === game.turn()) {
+        setSelectedSquare(square)
+        const moves = game.moves({ square: square as any, verbose: true })
+        setLegalMoveSquares(moves.map((m: any) => m.to))
+        return
+      }
+
+      // Clicked anything else — deselect
+      clearSelection()
+      return
+    }
+
+    // Nothing selected yet — select a piece of the current turn
+    const piece = game.get(square as any)
+    if (piece && piece.color === game.turn()) {
+      setSelectedSquare(square)
+      const moves = game.moves({ square: square as any, verbose: true })
+      setLegalMoveSquares(moves.map((m: any) => m.to))
     }
   }
 
@@ -236,6 +315,7 @@ export default function InstanceViewer({
                 position={game.fen()}
                 boardOrientation={boardOrientation}
                 onPieceDrop={onDrop}
+                onSquareClick={onSquareClick}
                 customSquareStyles={customSquareStyles}
                 customArrows={customArrows}
                 arePiecesDraggable={userTryMode && !userMadeMove}
@@ -342,9 +422,7 @@ export default function InstanceViewer({
                   {currentInstance.result && (
                     <div className="flex justify-between">
                       <span className="text-gray-600">Result:</span>
-                      <span className="font-medium text-gray-900">
-                        {currentInstance.result}
-                      </span>
+                      <span className="font-medium text-gray-900">{currentInstance.result}</span>
                     </div>
                   )}
                   {currentInstance.time_control && (
@@ -379,36 +457,13 @@ export default function InstanceViewer({
               {userMadeMove && (
                 <div
                   className={`border rounded-lg p-4 ${
-                    game.fen() !== currentInstance.fen
-                      ? currentInstance.best_move ===
-                        `${game.history({ verbose: true })[0]?.from}${
-                          game.history({ verbose: true })[0]?.to
-                        }`
-                        ? 'bg-green-50 border-green-200'
-                        : 'bg-red-50 border-red-200'
-                      : 'bg-gray-50 border-gray-200'
+                    moveWasBest ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'
                   }`}
                 >
-                  <p
-                    className={`text-sm ${
-                      game.fen() !== currentInstance.fen
-                        ? currentInstance.best_move ===
-                          `${game.history({ verbose: true })[0]?.from}${
-                            game.history({ verbose: true })[0]?.to
-                          }`
-                          ? 'text-green-800'
-                          : 'text-red-800'
-                        : 'text-gray-800'
-                    }`}
-                  >
-                    {game.fen() !== currentInstance.fen
-                      ? currentInstance.best_move ===
-                        `${game.history({ verbose: true })[0]?.from}${
-                          game.history({ verbose: true })[0]?.to
-                        }`
-                        ? 'Excellent! You found the best move.'
-                        : 'Not quite. Click "Show Best Move" to see the optimal move.'
-                      : 'Make your move on the board.'}
+                  <p className={`text-sm ${moveWasBest ? 'text-green-800' : 'text-red-800'}`}>
+                    {moveWasBest
+                      ? 'Excellent! You found the best move.'
+                      : 'Not quite. Click "Show Best Move" to see the optimal move.'}
                   </p>
                 </div>
               )}
@@ -424,9 +479,7 @@ export default function InstanceViewer({
             >
               ← Previous
             </button>
-            <div className="text-sm text-gray-600">
-              Swipe or use arrow keys to navigate
-            </div>
+            <div className="text-sm text-gray-600">Swipe or use arrow keys to navigate</div>
             <button
               onClick={handleNext}
               disabled={currentIndex === instances.length - 1}
