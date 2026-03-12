@@ -8,6 +8,27 @@ from io import StringIO
 from constants import PLATFORM_CHESS_COM
 
 
+def _normalize_chess_com_time_control(raw: str) -> str:
+    """Convert Chess.com's seconds-based time control to minutes+increment_seconds.
+
+    Chess.com API returns values in seconds (e.g. "300+0" for 5-min blitz).
+    Lichess already converts to minutes before storing, so we normalise here
+    to produce the same format ("5+0") that the categoriser expects.
+    """
+    if not raw or raw == "correspondence":
+        return raw or "correspondence"
+    try:
+        if '+' in raw:
+            parts = raw.split('+')
+            initial_min = int(parts[0]) // 60
+            increment_sec = int(parts[1])
+            return f"{initial_min}+{increment_sec}"
+        else:
+            return str(int(raw) // 60)
+    except (ValueError, IndexError):
+        return raw
+
+
 class ChessComClient:
     """Client for Chess.com Public API."""
 
@@ -97,10 +118,10 @@ class ChessComClient:
                 if total_sampled >= sample_size:
                     break
 
-                # Extract time control from game data
-                time_control = game.get("time_control", "")
-                if not time_control:
-                    time_control = "correspondence"
+                # Extract and normalise time control (Chess.com uses seconds)
+                time_control = _normalize_chess_com_time_control(
+                    game.get("time_control", "")
+                )
 
                 # Count this time control
                 time_controls[time_control] = time_controls.get(time_control, 0) + 1
@@ -126,8 +147,10 @@ class ChessComClient:
                 opening_eco = pgn.headers.get("ECO", None)
                 opening_name = pgn.headers.get("Opening", None)
 
-            # Extract time control
-            time_control = game_data.get("time_control", "")
+            # Extract and normalise time control (Chess.com uses seconds)
+            time_control = _normalize_chess_com_time_control(
+                game_data.get("time_control", "")
+            )
             time_class = game_data.get("time_class", "")
 
             return {

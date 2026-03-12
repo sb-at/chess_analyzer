@@ -37,8 +37,13 @@ def import_games_task(self, job_id: str, user_id: str, platform: str, username: 
     from database import SessionLocal, get_mongodb_sync
     from models import Job
     from chess_import import ChessComClient, LichessClient
+    from chess_import.chess_com_client import _normalize_chess_com_time_control
     import asyncio
     from uuid import UUID
+
+    # Normalize time_control_filter for Chess.com (API returns seconds, we store minutes)
+    if time_control_filter and platform == PLATFORM_CHESS_COM:
+        time_control_filter = _normalize_chess_com_time_control(time_control_filter)
 
     # Update job status
     db = SessionLocal()

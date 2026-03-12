@@ -14,31 +14,32 @@ def categorize_time_control(time_control: str) -> str:
     if not time_control or time_control == "correspondence":
         return "correspondence"
 
-    # Parse time control (format: "minutes+increment")
+    # Parse time control (format: "minutes+increment_seconds")
+    # Lichess converts to this format before storing; Chess.com is normalized
+    # at import time. Both arrive here as minutes+seconds.
     try:
         if '+' in time_control:
             parts = time_control.split('+')
             initial_minutes = int(parts[0])
-            increment = int(parts[1])
+            increment_seconds = int(parts[1])
 
-            # Calculate estimated game time (initial + 40 moves * increment)
-            total_time = initial_minutes + (40 * increment / 60)
+            # Estimated total minutes: initial + 40 moves * increment
+            total_minutes = initial_minutes + (40 * increment_seconds / 60)
 
-            # Categorize based on total estimated time
-            # Bullet: < 3 minutes
-            # Blitz: 3-10 minutes
-            # Rapid: 10-30 minutes
-            # Classical: 30+ minutes
-            if total_time < 3:
+            # Bullet:  < 3 min
+            # Blitz:   3–10 min
+            # Rapid:  10–30 min
+            # Classical: 30+ min
+            if total_minutes < 3:
                 return "bullet"
-            elif total_time < 10:
+            elif total_minutes < 10:
                 return "blitz"
-            elif total_time < 30:
+            elif total_minutes < 30:
                 return "rapid"
             else:
                 return "classical"
         else:
-            # Handle formats without increment
+            # No increment — value is in minutes
             minutes = int(time_control)
             if minutes < 3:
                 return "bullet"
