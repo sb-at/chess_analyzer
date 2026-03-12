@@ -54,3 +54,28 @@ async def get_current_user_optional(
         return await get_current_user(credentials, db)
     except HTTPException:
         return None
+
+
+security_optional = HTTPBearer(auto_error=False)
+
+
+async def get_optional_user(
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security_optional),
+    db: Session = Depends(get_db)
+) -> Optional[User]:
+    """Get current user if authenticated, None otherwise (without requiring auth header)."""
+    if not credentials:
+        return None
+
+    token = credentials.credentials
+    payload = verify_token(token)
+
+    if not payload:
+        return None
+
+    user_id = payload.get("sub")
+    if not user_id:
+        return None
+
+    user = db.query(User).filter(User.id == user_id).first()
+    return user

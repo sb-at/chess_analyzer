@@ -1,9 +1,12 @@
 import { useEffect, useState } from 'react'
 import Head from 'next/head'
 import { useRouter } from 'next/router'
+import InstanceViewer from '../../components/InstanceViewer'
+import { patterns as patternsApi, openings as openingsApi, analysis as analysisApi } from '../../lib/api'
 
 interface Pattern {
-  id: string
+  _id: string  // MongoDB ObjectId for public analyses
+  id?: string  // PostgreSQL UUID for authenticated users
   pattern_type: string
   pattern_subtype: string
   severity: number
@@ -52,6 +55,12 @@ export default function Results() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
+  // Instance Viewer state
+  const [viewerOpen, setViewerOpen] = useState(false)
+  const [viewerInstances, setViewerInstances] = useState<any[]>([])
+  const [viewerTitle, setViewerTitle] = useState('')
+  const [loadingInstances, setLoadingInstances] = useState(false)
+
   useEffect(() => {
     if (!jobId) return
 
@@ -85,6 +94,46 @@ export default function Results() {
 
     pollResults()
   }, [jobId])
+
+  const handlePatternClick = async (patternId: string, patternName: string) => {
+    setLoadingInstances(true)
+    setViewerTitle(`${patternName} - Review Instances`)
+
+    // Use analysis API for MongoDB-based patterns (public analyses)
+    const response = await analysisApi.getPatternInstances(patternId)
+
+    if (response.data && response.data.instances) {
+      setViewerInstances(response.data.instances)
+      setViewerOpen(true)
+    } else {
+      console.error('Failed to load pattern instances:', response.error)
+      alert(`Failed to load pattern instances: ${response.error || 'Unknown error'}`)
+    }
+
+    setLoadingInstances(false)
+  }
+
+  const handleOpeningClick = async (opening: Opening, userColor: string) => {
+    setLoadingInstances(true)
+    setViewerTitle(`${opening.name} - Problematic Positions`)
+
+    const response = await openingsApi.getInstances({
+      opening_name: opening.name,
+      opening_eco: opening.eco || undefined,
+      user_color: userColor,
+      job_id: typeof jobId === 'string' ? jobId : undefined,
+    })
+
+    if (response.data && response.data.instances) {
+      setViewerInstances(response.data.instances)
+      setViewerOpen(true)
+    } else {
+      console.error('Failed to load opening instances:', response.error)
+      alert(`Failed to load opening instances: ${response.error || 'Unknown error'}`)
+    }
+
+    setLoadingInstances(false)
+  }
 
   if (error) {
     return (
@@ -240,7 +289,11 @@ export default function Results() {
                   {openingStats.white_openings.length > 0 ? (
                     <div className="space-y-3">
                       {openingStats.white_openings.slice(0, 10).map((opening, index) => (
-                        <OpeningRow key={index} opening={opening} />
+                        <OpeningRow
+                          key={index}
+                          opening={opening}
+                          onClick={() => handleOpeningClick(opening, 'white')}
+                        />
                       ))}
                     </div>
                   ) : (
@@ -256,7 +309,11 @@ export default function Results() {
                   {openingStats.black_openings.length > 0 ? (
                     <div className="space-y-3">
                       {openingStats.black_openings.slice(0, 10).map((opening, index) => (
-                        <OpeningRow key={index} opening={opening} />
+                        <OpeningRow
+                          key={index}
+                          opening={opening}
+                          onClick={() => handleOpeningClick(opening, 'black')}
+                        />
                       ))}
                     </div>
                   ) : (
@@ -285,7 +342,14 @@ export default function Results() {
               <h2 className="text-2xl font-bold mb-6">Top Blind Spots</h2>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                 {patterns.slice(0, 3).map((pattern, index) => (
-                  <PatternCard key={pattern.id} pattern={pattern} rank={index + 1} />
+                  <PatternCard
+                    key={pattern._id || pattern.id}
+                    pattern={pattern}
+                    rank={index + 1}
+                    onClick={() =>
+                      handlePatternClick(pattern._id || pattern.id!, formatPatternName(pattern.pattern_subtype))
+                    }
+                  />
                 ))}
               </div>
 
@@ -294,7 +358,13 @@ export default function Results() {
                   <h3 className="text-xl font-bold mb-4">All Patterns</h3>
                   <div className="space-y-4">
                     {patterns.slice(3).map((pattern) => (
-                      <PatternRow key={pattern.id} pattern={pattern} />
+                      <PatternRow
+                        key={pattern._id || pattern.id}
+                        pattern={pattern}
+                        onClick={() =>
+                          handlePatternClick(pattern._id || pattern.id!, formatPatternName(pattern.pattern_subtype))
+                        }
+                      />
                     ))}
                   </div>
                 </div>
@@ -302,58 +372,91 @@ export default function Results() {
             </div>
           )}
         </div>
+
+        {/* Instance Viewer Modal */}
+        <InstanceViewer
+          instances={viewerInstances}
+          isOpen={viewerOpen}
+          onClose={() => setViewerOpen(false)}
+          title={viewerTitle}
+        />
+
+        {/* Loading Overlay */}
+        {loadingInstances && (
+          <div className="fixed inset-0 z-40 flex items-center justify-center bg-black bg-opacity-30">
+            <div className="bg-white rounded-lg p-6 shadow-xl">
+              <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+              <p className="text-gray-600">Loading instances...</p>
+            </div>
+          </div>
+        )}
       </div>
     </>
   )
 }
 
-function PatternCard({ pattern, rank }: { pattern: Pattern; rank: number }) {
+function PatternCard({
+  pattern,
+  rank,
+  onClick,
+}: {
+  pattern: Pattern
+  rank: number
+  onClick?: () => void
+}) {
   const severityColor = pattern.severity > 0.7 ? 'red' : pattern.severity > 0.4 ? 'yellow' : 'blue'
   const colorClasses = {
     red: 'bg-red-100 border-red-500',
     yellow: 'bg-yellow-100 border-yellow-500',
-    blue: 'bg-blue-100 border-blue-500'
+    blue: 'bg-blue-100 border-blue-500',
   }
 
   const badgeClasses = {
     red: 'bg-red-500',
     yellow: 'bg-yellow-500',
-    blue: 'bg-blue-500'
+    blue: 'bg-blue-500',
   }
 
   const severityLabel = pattern.severity > 0.7 ? 'High' : pattern.severity > 0.4 ? 'Medium' : 'Low'
 
   return (
-    <div className={`border-2 rounded-lg p-4 ${colorClasses[severityColor]}`}>
+    <div
+      className={`border-2 rounded-lg p-4 ${colorClasses[severityColor]} cursor-pointer hover:shadow-lg transition-shadow`}
+      onClick={onClick}
+    >
       <div className="flex items-center justify-between mb-2">
         <span className="text-3xl font-bold text-gray-700">#{rank}</span>
-        <span className={`${badgeClasses[severityColor]} text-white px-3 py-1 rounded-full text-xs font-semibold`}>
+        <span
+          className={`${badgeClasses[severityColor]} text-white px-3 py-1 rounded-full text-xs font-semibold`}
+        >
           {severityLabel}
         </span>
       </div>
 
-      <h3 className="text-lg font-semibold mb-2">
-        {formatPatternName(pattern.pattern_subtype)}
-      </h3>
+      <h3 className="text-lg font-semibold mb-2">{formatPatternName(pattern.pattern_subtype)}</h3>
 
-      <div className="text-sm text-gray-600 mb-3">
-        Frequency: {pattern.frequency} times
-      </div>
+      <div className="text-sm text-gray-600 mb-3">Frequency: {pattern.frequency} times</div>
+
+      <div className="text-xs text-blue-600 font-medium mt-2">Click to review instances →</div>
     </div>
   )
 }
 
-function PatternRow({ pattern }: { pattern: Pattern }) {
+function PatternRow({ pattern, onClick }: { pattern: Pattern; onClick?: () => void }) {
   return (
-    <div className="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
-      <div>
+    <div
+      className="flex items-center justify-between p-4 bg-gray-50 rounded-lg cursor-pointer hover:bg-gray-100 transition-colors"
+      onClick={onClick}
+    >
+      <div className="flex-1">
         <h4 className="font-semibold">{formatPatternName(pattern.pattern_subtype)}</h4>
         <p className="text-sm text-gray-600">Type: {pattern.pattern_type}</p>
       </div>
-      <div className="text-right">
+      <div className="text-right mr-4">
         <div className="text-sm text-gray-600">Frequency: {pattern.frequency}</div>
         <div className="text-sm text-gray-600">Severity: {(pattern.severity * 100).toFixed(0)}%</div>
       </div>
+      <div className="text-blue-600 text-sm font-medium">Review →</div>
     </div>
   )
 }
@@ -365,12 +468,23 @@ function formatPatternName(subtype: string): string {
     .join(' ')
 }
 
-function OpeningRow({ opening }: { opening: Opening }) {
-  const winRateColor = opening.win_rate >= 60 ? 'text-green-600' : opening.win_rate >= 40 ? 'text-gray-700' : 'text-red-600'
-  const bgColor = opening.win_rate >= 60 ? 'bg-green-50' : opening.win_rate >= 40 ? 'bg-gray-50' : 'bg-red-50'
+function OpeningRow({
+  opening,
+  onClick,
+}: {
+  opening: Opening
+  onClick?: () => void
+}) {
+  const winRateColor =
+    opening.win_rate >= 60 ? 'text-green-600' : opening.win_rate >= 40 ? 'text-gray-700' : 'text-red-600'
+  const bgColor =
+    opening.win_rate >= 60 ? 'bg-green-50' : opening.win_rate >= 40 ? 'bg-gray-50' : 'bg-red-50'
 
   return (
-    <div className={`${bgColor} rounded-lg p-4 border border-gray-200`}>
+    <div
+      className={`${bgColor} rounded-lg p-4 border border-gray-200 cursor-pointer hover:shadow-md transition-shadow`}
+      onClick={onClick}
+    >
       <div className="flex items-start justify-between">
         <div className="flex-1">
           <div className="font-semibold text-gray-800 mb-1">
@@ -385,10 +499,9 @@ function OpeningRow({ opening }: { opening: Opening }) {
             {opening.count} game{opening.count !== 1 ? 's' : ''} •{' '}
             {opening.wins}W / {opening.draws}D / {opening.losses}L
           </div>
+          <div className="text-xs text-blue-600 font-medium mt-1">Click to review positions →</div>
         </div>
-        <div className={`text-right font-bold text-lg ${winRateColor}`}>
-          {opening.win_rate}%
-        </div>
+        <div className={`text-right font-bold text-lg ${winRateColor}`}>{opening.win_rate}%</div>
       </div>
     </div>
   )

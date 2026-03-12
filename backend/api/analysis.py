@@ -401,6 +401,84 @@ async def detect_patterns(
     )
 
 
+@router.get("/patterns/{pattern_id}/instances")
+async def get_pattern_instances(
+    pattern_id: str,
+    db: Session = Depends(get_db)
+):
+    """Get detailed instances for a MongoDB-based pattern from public analysis.
+
+    This endpoint handles patterns stored in MongoDB (from public analyses),
+    as opposed to /api/patterns/{pattern_id}/instances which handles PostgreSQL patterns.
+    """
+    from database import get_mongodb
+    import traceback
+
+    mongodb = get_mongodb()
+
+    # Find the pattern in MongoDB
+    try:
+        pattern = await mongodb.patterns.find_one({"_id": ObjectId(pattern_id)})
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid pattern ID format: {str(e)}"
+        )
+
+    if not pattern:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Pattern not found"
+        )
+
+    instances = []
+    examples = pattern.get('examples', [])
+
+    for idx, example in enumerate(examples):
+        game_id = example.get('game_id')
+        if not game_id:
+            continue
+
+        # Fetch game from MongoDB
+        try:
+            game = await mongodb.games.find_one({"_id": ObjectId(game_id)})
+            if not game:
+                continue
+
+            instance = {
+                'game_id': str(game['_id']),
+                'fen': example.get('fen', ''),
+                'move_number': example.get('move_number'),
+                'move_played': example.get('san') or example.get('move'),
+                'best_move': example.get('best_move') or example.get('missed_move'),
+                'eval_loss': example.get('eval_loss', 0),
+                'date': example.get('date') or game.get('date'),
+                'opening_name': game.get('opening_name'),
+                'opening_eco': game.get('opening_eco'),
+                'result': game.get('result'),
+                'user_color': game.get('user_color'),
+                'time_control': game.get('time_control'),
+                'motif': example.get('motif'),
+                'is_mistake': example.get('is_mistake', False),
+                'is_blunder': example.get('is_blunder', False)
+            }
+
+            instances.append(instance)
+        except Exception as e:
+            print(f"[ERROR] Error fetching game {game_id}: {e}")
+            traceback.print_exc()
+            continue
+
+    return {
+        'pattern_id': str(pattern['_id']),
+        'pattern_type': pattern.get('pattern_type'),
+        'pattern_subtype': pattern.get('pattern_subtype'),
+        'description': pattern.get('description'),
+        'instances': instances,
+        'total_instances': len(instances)
+    }
+
+
 @router.get("/stats")
 async def get_analysis_stats(
     current_user: User = Depends(get_current_user),

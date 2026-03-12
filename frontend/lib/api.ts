@@ -19,9 +19,9 @@ export async function apiRequest<T = any>(
   try {
     const token = localStorage.getItem('access_token')
 
-    const headers: HeadersInit = {
+    const headers: Record<string, string> = {
       'Content-Type': 'application/json',
-      ...options.headers,
+      ...(options.headers as Record<string, string>),
     }
 
     if (token) {
@@ -78,6 +78,33 @@ export const patterns = {
   list: () => apiRequest('/api/patterns'),
   get: (patternId: string) => apiRequest(`/api/patterns/${patternId}`),
   getProgress: () => apiRequest('/api/patterns/progress/history'),
+  getInstances: (patternId: string) => apiRequest(`/api/patterns/${patternId}/instances`),
+}
+
+/**
+ * Analysis API calls
+ */
+export const analysis = {
+  getPatternInstances: (patternId: string) => apiRequest(`/api/analysis/patterns/${patternId}/instances`),
+}
+
+/**
+ * Openings API calls
+ */
+export const openings = {
+  getInstances: (params: {
+    opening_name?: string
+    opening_eco?: string
+    user_color?: string
+    job_id?: string
+  }) => {
+    const queryParams = new URLSearchParams()
+    if (params.opening_name) queryParams.append('opening_name', params.opening_name)
+    if (params.opening_eco) queryParams.append('opening_eco', params.opening_eco)
+    if (params.user_color) queryParams.append('user_color', params.user_color)
+    if (params.job_id) queryParams.append('job_id', params.job_id)
+    return apiRequest(`/api/openings/instances?${queryParams.toString()}`)
+  },
 }
 
 /**

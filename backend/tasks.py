@@ -159,9 +159,13 @@ def import_games_task(self, job_id: str, user_id: str, platform: str, username: 
             job.progress = progress
             db.commit()
 
-        # Update existing games with job_id so they're associated with this analysis
+        # Update only the games in games_to_import with job_id (not all existing games)
+        # Create a set of game IDs that are in games_to_import for efficient lookup
+        games_to_import_ids = {g.get("_id") for g in games_to_import if g.get("_id")}
+
         for game in existing_games:
-            if game.get("_id"):
+            # Only update if this game is in our games_to_import list
+            if game.get("_id") and game["_id"] in games_to_import_ids:
                 games_collection.update_one(
                     {"_id": game["_id"]},
                     {"$set": {"job_id": job_id}}
