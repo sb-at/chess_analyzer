@@ -81,6 +81,17 @@ Press `Ctrl+C` to stop both.
 
 ---
 
+## Using the app
+
+1. Open `http://localhost:3000`
+2. Enter your Lichess or Chess.com username — no account needed
+3. Select the time control you want to analyze
+4. Choose how many games (25 / 50 / 100 / 250 / 500)
+5. Wait for analysis to complete
+6. Click any pattern or opening to play over your mistakes on an interactive board
+
+---
+
 ## What run_local.py replaces vs Docker
 
 | Docker service | Local equivalent |

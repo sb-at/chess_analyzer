@@ -48,33 +48,7 @@ chess_analyzer/
 
 ## Getting Started
 
-### Prerequisites
-
-- Python 3.10+
-- Node.js 18+
-- MongoDB Community — the only required external service ([download](https://www.mongodb.com/try/download/community), install as a service)
-- Stockfish chess engine ([download](https://stockfishchess.org/download/), just unzip)
-
-### Setup (one time)
-
-```bash
-git clone <repository-url>
-cd chess_analyzer
-pip install -r backend/requirements.txt
-cd frontend && npm install && cd ..
-```
-
-### Run
-
-```bash
-python run_local.py --stockfish "C:/path/to/stockfish.exe"
-```
-
-Open `http://localhost:3000`, enter a chess username (Lichess or Chess.com), and go.
-
-No Docker, no `.env` file, no OAuth credentials needed.
-
-`run_local.py` automatically uses SQLite instead of PostgreSQL and runs analysis in-process instead of Celery, so MongoDB is the only external dependency.
+See [SETUP.md](SETUP.md) for installation and setup instructions.
 
 ## Development Phases
 
