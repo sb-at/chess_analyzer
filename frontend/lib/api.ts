@@ -9,23 +9,14 @@ export interface ApiResponse<T = any> {
   error?: string
 }
 
-/**
- * Make an authenticated API request
- */
 export async function apiRequest<T = any>(
   endpoint: string,
   options: RequestInit = {}
 ): Promise<ApiResponse<T>> {
   try {
-    const token = localStorage.getItem('access_token')
-
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
       ...(options.headers as Record<string, string>),
-    }
-
-    if (token) {
-      headers['Authorization'] = `Bearer ${token}`
     }
 
     const response = await fetch(`${API_URL}${endpoint}`, {
@@ -48,44 +39,11 @@ export async function apiRequest<T = any>(
 }
 
 /**
- * Auth API calls
- */
-export const auth = {
-  getChessComAuthUrl: () => apiRequest('/api/auth/chess-com/authorize'),
-  getLichessAuthUrl: () => apiRequest('/api/auth/lichess/authorize'),
-  getCurrentUser: () => apiRequest('/api/auth/me'),
-}
-
-/**
- * Games API calls
- */
-export const games = {
-  import: (platform: string, limit: number) =>
-    apiRequest('/api/games/import', {
-      method: 'POST',
-      body: JSON.stringify({ platform, limit }),
-    }),
-  list: (limit = 50, skip = 0, analyzedOnly = false) =>
-    apiRequest(`/api/games?limit=${limit}&skip=${skip}&analyzed_only=${analyzedOnly}`),
-  get: (gameId: string) => apiRequest(`/api/games/${gameId}`),
-  getSummary: () => apiRequest('/api/games/stats/summary'),
-}
-
-/**
- * Patterns API calls
- */
-export const patterns = {
-  list: () => apiRequest('/api/patterns'),
-  get: (patternId: string) => apiRequest(`/api/patterns/${patternId}`),
-  getProgress: () => apiRequest('/api/patterns/progress/history'),
-  getInstances: (patternId: string) => apiRequest(`/api/patterns/${patternId}/instances`),
-}
-
-/**
  * Analysis API calls
  */
 export const analysis = {
-  getPatternInstances: (patternId: string) => apiRequest(`/api/analysis/patterns/${patternId}/instances`),
+  getPatternInstances: (patternId: string) =>
+    apiRequest(`/api/analysis/patterns/${patternId}/instances`),
 }
 
 /**
@@ -105,12 +63,4 @@ export const openings = {
     if (params.job_id) queryParams.append('job_id', params.job_id)
     return apiRequest(`/api/openings/instances?${queryParams.toString()}`)
   },
-}
-
-/**
- * Jobs API calls
- */
-export const jobs = {
-  get: (jobId: string) => apiRequest(`/api/jobs/${jobId}`),
-  list: (limit = 50) => apiRequest(`/api/jobs?limit=${limit}`),
 }

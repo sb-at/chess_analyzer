@@ -4,7 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from config import get_settings
 from database import init_mongodb_indexes
-from api import auth, games, patterns, jobs, analysis, openings
+from api import analysis, openings
 
 settings = get_settings()
 
@@ -37,14 +37,8 @@ app.add_middleware(
 )
 
 # Include routers
-app.include_router(auth.router, prefix="/api/auth", tags=["Authentication"])
-app.include_router(games.router, prefix="/api/games", tags=["Games"])
-app.include_router(patterns.router, prefix="/api/patterns", tags=["Patterns"])
 app.include_router(openings.router, prefix="/api/openings", tags=["Openings"])
-app.include_router(jobs.router, prefix="/api/jobs", tags=["Jobs"])
 app.include_router(analysis.router, prefix="/api/analysis", tags=["Analysis"])
-
-# Test endpoints removed - module doesn't exist
 
 
 @app.get("/")
