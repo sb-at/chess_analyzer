@@ -120,7 +120,6 @@ class GetTimeControlsRequest(BaseModel):
     """Get time controls request."""
     platform: str
     username: str
-    sample_size: int = 100
 
 
 class TimeControlInfo(BaseModel):
@@ -143,7 +142,6 @@ class GetTimeControlsResponse(BaseModel):
 async def get_time_controls(request: GetTimeControlsRequest):
     """Get time controls played by a user by scanning their recent games."""
     from chess_import import ChessComClient, LichessClient
-    from utils.time_control import categorize_time_control, format_display_name
 
     if request.platform not in VALID_PLATFORMS:
         raise HTTPException(
@@ -160,31 +158,16 @@ async def get_time_controls(request: GetTimeControlsRequest):
     try:
         if request.platform == PLATFORM_CHESS_COM:
             client = ChessComClient(request.username.strip())
-            time_controls_dict, total_sampled = await client.get_time_controls_quick(
-                sample_size=request.sample_size
-            )
+            time_controls_dict, total_sampled = await client.get_time_controls_from_stats()
         else:
             client = LichessClient(request.username.strip(), token=None)
-            time_controls_dict, total_sampled = await client.get_time_controls_quick(
-                sample_size=request.sample_size
-            )
-
-        min_games = 5
-        filtered_time_controls = {
-            tc: count for tc, count in time_controls_dict.items()
-            if count >= min_games
-        }
-
-        if not filtered_time_controls:
-            filtered_time_controls = time_controls_dict
+            time_controls_dict, total_sampled = await client.get_time_controls_from_stats()
 
         time_controls_list = []
-        for time_control, count in filtered_time_controls.items():
-            category = categorize_time_control(time_control)
-            display_name = format_display_name(time_control, category)
+        for category, count in time_controls_dict.items():
             time_controls_list.append(TimeControlInfo(
-                time_control=time_control,
-                display_name=display_name,
+                time_control=category,
+                display_name=category.capitalize(),
                 count=count,
                 category=category
             ))

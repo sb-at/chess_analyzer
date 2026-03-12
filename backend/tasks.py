@@ -32,18 +32,17 @@ def import_games_task(self, job_id: str, user_id: str, platform: str, username: 
     """Background task to import games from chess platform.
 
     Args:
-        time_control_filter: Optional time control to filter games by (e.g., "3+0", "10+0")
+        time_control_filter: Optional time control category to filter games by (e.g., "bullet", "blitz", "rapid")
     """
     from database import SessionLocal, get_mongodb_sync
     from models import Job
     from chess_import import ChessComClient, LichessClient
-    from chess_import.chess_com_client import _normalize_chess_com_time_control
     import asyncio
     from uuid import UUID
 
-    # Normalize time_control_filter for Chess.com (API returns seconds, we store minutes)
-    if time_control_filter and platform == PLATFORM_CHESS_COM:
-        time_control_filter = _normalize_chess_com_time_control(time_control_filter)
+    # time_control_filter is now a category name ("bullet", "blitz", "rapid", etc.)
+    # Games store exact time controls ("5+0", "3+2"), so we filter by category in Python
+    from utils.time_control import categorize_time_control
 
     # Update job status
     db = SessionLocal()
@@ -69,10 +68,18 @@ def import_games_task(self, job_id: str, user_id: str, platform: str, username: 
                 {"black_player": username}
             ]
         }
-        if time_control_filter:
-            existing_query["time_control"] = time_control_filter
 
-        existing_games = list(games_collection.find(existing_query).sort("date", -1).limit(limit))
+        # time_control_filter is a category — fetch extra games and filter by category in Python
+        db_fetch_limit = limit * 5 if time_control_filter else limit
+        existing_games_raw = list(games_collection.find(existing_query).sort("date", -1).limit(db_fetch_limit))
+
+        if time_control_filter:
+            existing_games = [
+                g for g in existing_games_raw
+                if categorize_time_control(g.get("time_control", "")) == time_control_filter
+            ][:limit]
+        else:
+            existing_games = existing_games_raw
         existing_count = len(existing_games)
         existing_game_ids = {game.get("game_id") for game in existing_games}
 
@@ -97,9 +104,12 @@ def import_games_task(self, job_id: str, user_id: str, platform: str, username: 
             if game.get("game_id") not in existing_game_ids:
                 new_games.append(game)
 
-        # Filter new games by time control if specified
+        # Filter new games by category
         if time_control_filter:
-            new_games = [g for g in new_games if g.get("time_control") == time_control_filter]
+            new_games = [
+                g for g in new_games
+                if categorize_time_control(g.get("time_control", "")) == time_control_filter
+            ]
 
         new_count = len(new_games)
         print(f"Found {new_count} new games on platform")

@@ -73,35 +73,37 @@ class LichessClient:
 
         return games
 
-    async def get_time_controls_quick(self, sample_size: int = 100) -> tuple[dict[str, int], int]:
-        """Quickly scan recent games to discover time controls played.
-
-        Args:
-            sample_size: Number of games to sample
+    async def get_time_controls_from_stats(self) -> tuple[dict[str, int], int]:
+        """Get time controls from user profile stats (instant, no game sampling).
 
         Returns:
-            Tuple of (time_controls_dict, total_sampled) where:
-            - time_controls_dict: {time_control: count}
-            - total_sampled: Number of games actually sampled
+            Tuple of (time_controls_dict, total_games) where:
+            - time_controls_dict: {category: count} e.g. {"bullet": 1200, "blitz": 3400}
+            - total_games: Total number of games across all categories
         """
-        time_controls = {}
-        total_sampled = 0
+        profile = await self.get_user_profile()
+        perfs = profile.get("perfs", {})
 
-        async for game_data in self.stream_games(max_games=sample_size):
-            # Extract time control without full game processing
-            clock = game_data.get("clock", {})
-            if clock:
-                initial = clock.get("initial", 0) // 60  # Convert seconds to minutes
-                increment = clock.get("increment", 0)
-                time_control = f"{initial}+{increment}"
-            else:
-                time_control = "correspondence"
+        # Map Lichess perf keys to standard categories
+        # ultraBullet is grouped into bullet
+        perf_to_category = {
+            "ultraBullet": "bullet",
+            "bullet": "bullet",
+            "blitz": "blitz",
+            "rapid": "rapid",
+            "classical": "classical",
+            "correspondence": "correspondence",
+        }
 
-            # Count this time control
-            time_controls[time_control] = time_controls.get(time_control, 0) + 1
-            total_sampled += 1
+        time_controls: dict[str, int] = {}
+        total = 0
+        for perf_key, category in perf_to_category.items():
+            games = perfs.get(perf_key, {}).get("games", 0)
+            if games > 0:
+                time_controls[category] = time_controls.get(category, 0) + games
+                total += games
 
-        return time_controls, total_sampled
+        return time_controls, total
 
     def _process_game(self, game_data: dict) -> Optional[dict]:
         """Process raw Lichess game data into standardized format."""

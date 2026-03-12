@@ -92,42 +92,41 @@ class ChessComClient:
 
         return processed_games
 
-    async def get_time_controls_quick(self, sample_size: int = 100) -> tuple[dict[str, int], int]:
-        """Quickly scan recent games to discover time controls played.
-
-        Args:
-            sample_size: Number of games to sample
+    async def get_time_controls_from_stats(self) -> tuple[dict[str, int], int]:
+        """Get time controls from player stats API.
 
         Returns:
-            Tuple of (time_controls_dict, total_sampled) where:
-            - time_controls_dict: {time_control: count}
-            - total_sampled: Number of games actually sampled
+            Tuple of (time_controls_dict, total_games) where:
+            - time_controls_dict: {category: count} e.g. {"bullet": 500, "blitz": 2000}
+            - total_games: Total number of games across all categories
         """
-        archives = await self.get_game_archives()
-        time_controls = {}
-        total_sampled = 0
+        await asyncio.sleep(self.rate_limit_delay)
+        async with httpx.AsyncClient(timeout=30.0, verify=self.verify_ssl) as client:
+            response = await client.get(
+                f"{self.base_url}/player/{self.username}/stats"
+            )
+            response.raise_for_status()
+            stats = response.json()
 
-        # Start from most recent archive and work backwards
-        for archive_url in reversed(archives):
-            if total_sampled >= sample_size:
-                break
+        # Map Chess.com stat keys to standard categories
+        stat_to_category = {
+            "chess_bullet": "bullet",
+            "chess_blitz": "blitz",
+            "chess_rapid": "rapid",
+            "chess_daily": "classical",
+        }
 
-            month_games = await self.get_games_from_archive(archive_url)
+        time_controls: dict[str, int] = {}
+        total = 0
+        for stat_key, category in stat_to_category.items():
+            if stat_key in stats:
+                record = stats[stat_key].get("record", {})
+                games = record.get("win", 0) + record.get("loss", 0) + record.get("draw", 0)
+                if games > 0:
+                    time_controls[category] = games
+                    total += games
 
-            for game in month_games:
-                if total_sampled >= sample_size:
-                    break
-
-                # Extract and normalise time control (Chess.com uses seconds)
-                time_control = _normalize_chess_com_time_control(
-                    game.get("time_control", "")
-                )
-
-                # Count this time control
-                time_controls[time_control] = time_controls.get(time_control, 0) + 1
-                total_sampled += 1
-
-        return time_controls, total_sampled
+        return time_controls, total
 
     def _process_game(self, game_data: dict) -> Optional[dict]:
         """Process raw Chess.com game data into standardized format."""

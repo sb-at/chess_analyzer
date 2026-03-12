@@ -30,8 +30,7 @@ export default function SelectTimeControl() {
           },
           body: JSON.stringify({
             platform,
-            username,
-            sample_size: 100
+            username
           })
         })
 

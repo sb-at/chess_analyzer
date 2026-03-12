@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import Head from 'next/head'
 import { useRouter } from 'next/router'
 import InstanceViewer from '../../components/InstanceViewer'
-import { patterns as patternsApi, openings as openingsApi, analysis as analysisApi } from '../../lib/api'
+import { openings as openingsApi, analysis as analysisApi } from '../../lib/api'
 
 interface Pattern {
   _id: string  // MongoDB ObjectId for public analyses
@@ -59,6 +59,7 @@ export default function Results() {
   const [viewerOpen, setViewerOpen] = useState(false)
   const [viewerInstances, setViewerInstances] = useState<any[]>([])
   const [viewerTitle, setViewerTitle] = useState('')
+  const [viewerKey, setViewerKey] = useState(0)
   const [loadingInstances, setLoadingInstances] = useState(false)
 
   useEffect(() => {
@@ -102,7 +103,8 @@ export default function Results() {
     // Use analysis API for MongoDB-based patterns (public analyses)
     const response = await analysisApi.getPatternInstances(patternId)
 
-    if (response.data && response.data.instances) {
+    if (response.data?.instances) {
+      setViewerKey(k => k + 1)
       setViewerInstances(response.data.instances)
       setViewerOpen(true)
     } else {
@@ -124,7 +126,8 @@ export default function Results() {
       job_id: typeof jobId === 'string' ? jobId : undefined,
     })
 
-    if (response.data && response.data.instances) {
+    if (response.data?.instances) {
+      setViewerKey(k => k + 1)
       setViewerInstances(response.data.instances)
       setViewerOpen(true)
     } else {
@@ -375,6 +378,7 @@ export default function Results() {
 
         {/* Instance Viewer Modal */}
         <InstanceViewer
+          key={viewerKey}
           instances={viewerInstances}
           isOpen={viewerOpen}
           onClose={() => setViewerOpen(false)}
