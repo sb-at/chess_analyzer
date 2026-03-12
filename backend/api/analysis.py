@@ -1,5 +1,6 @@
 """Analysis API routes."""
-from fastapi import APIRouter, Depends, HTTPException, status
+import os
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from typing import Optional, Any
@@ -10,6 +11,8 @@ from constants import PLATFORM_CHESS_COM, PLATFORM_LICHESS, VALID_PLATFORMS
 from bson import ObjectId
 import uuid
 import httpx
+
+USE_CELERY = os.getenv("USE_CELERY", "true").lower() != "false"
 
 router = APIRouter()
 
@@ -44,6 +47,7 @@ class StartAnalysisResponse(BaseModel):
 @router.post("/start", response_model=StartAnalysisResponse)
 async def start_analysis(
     request: StartAnalysisRequest,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db)
 ):
     """Start analysis for any username without authentication.
@@ -81,15 +85,29 @@ async def start_analysis(
     db.commit()
     db.refresh(job)
 
-    import_games_task.delay(
-        job_id=str(job.id),
-        user_id=None,
-        platform=request.platform,
-        username=request.username.strip(),
-        access_token=None,
-        limit=request.limit,
-        time_control_filter=request.time_control
-    )
+    if USE_CELERY:
+        import_games_task.delay(
+            job_id=str(job.id),
+            user_id=None,
+            platform=request.platform,
+            username=request.username.strip(),
+            access_token=None,
+            limit=request.limit,
+            time_control_filter=request.time_control,
+        )
+    else:
+        # Run in FastAPI's background thread pool — no Redis/Celery worker required.
+        # import_games_task.run() calls the underlying function directly.
+        background_tasks.add_task(
+            import_games_task.run,
+            str(job.id),
+            None,                        # user_id
+            request.platform,
+            request.username.strip(),
+            None,                        # access_token
+            request.limit,
+            request.time_control,
+        )
 
     return StartAnalysisResponse(
         job_id=str(job.id),

@@ -3,20 +3,19 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from config import get_settings
-from database import init_mongodb_indexes
-from api import analysis, openings
+from database import init_mongodb_indexes, engine, Base
 
 settings = get_settings()
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Lifespan context manager for startup/shutdown events."""
-    # Startup
+    """Startup: create DB tables (works for both PostgreSQL and SQLite) and MongoDB indexes."""
+    Base.metadata.create_all(bind=engine)
+    print("Database schema ready")
     await init_mongodb_indexes()
     print("MongoDB indexes initialized")
     yield
-    # Shutdown
     print("Application shutting down")
 
 
@@ -37,23 +36,23 @@ app.add_middleware(
 )
 
 # Include routers
+from api import auth, games, patterns, jobs, analysis, openings
+
+app.include_router(auth.router, prefix="/api/auth", tags=["Authentication"])
+app.include_router(games.router, prefix="/api/games", tags=["Games"])
+app.include_router(patterns.router, prefix="/api/patterns", tags=["Patterns"])
 app.include_router(openings.router, prefix="/api/openings", tags=["Openings"])
+app.include_router(jobs.router, prefix="/api/jobs", tags=["Jobs"])
 app.include_router(analysis.router, prefix="/api/analysis", tags=["Analysis"])
 
 
 @app.get("/")
 async def root():
-    """Root endpoint."""
-    return {
-        "message": "Welcome to ChessMirror API",
-        "version": "1.0.0",
-        "docs": "/docs"
-    }
+    return {"message": "Welcome to ChessMirror API", "version": "1.0.0", "docs": "/docs"}
 
 
 @app.get("/health")
 async def health_check():
-    """Health check endpoint."""
     return {"status": "healthy"}
 
 
