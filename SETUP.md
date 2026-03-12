@@ -1,268 +1,128 @@
-# Setup Guide for ChessMirror
+# Setup Guide
 
-This guide will help you get the ChessMirror Chess Pattern Analyzer up and running locally.
+For a fast path to running the app, see [QUICKSTART.md](QUICKSTART.md).
+
+---
 
 ## Prerequisites
 
-- Python 3.11 or higher
-- Node.js 18 or higher
-- Docker and Docker Compose
-- Git
+- **Python 3.10+** — python.org
+- **Node.js 18+** — nodejs.org
+- **MongoDB Community** — the only required external service
+- **Stockfish** — required for chess analysis
 
-## Quick Start with Docker
+Docker is not required.
 
-The easiest way to get started is using Docker Compose, which will set up all services automatically.
+---
 
-### 1. Clone the Repository
+## Install MongoDB
+
+Download MongoDB Community from mongodb.com/try/download/community.
+
+**Windows**: Run the MSI installer. Check "Install MongoDB as a Service" — this means it starts automatically and you never need to run `mongod` manually.
+
+**macOS**: `brew tap mongodb/brew && brew install mongodb-community && brew services start mongodb-community`
+
+**Linux**: Follow the distro-specific instructions at mongodb.com/docs/manual/installation/
+
+Verify it's running:
+```bash
+mongosh --eval "db.adminCommand('ping')"
+```
+
+---
+
+## Install Stockfish
+
+Download a prebuilt binary from stockfishchess.org/download. Unzip it anywhere.
+
+`run_local.py` checks several common locations automatically:
+- Project root (`stockfish.exe`)
+- `C:\Program Files\Stockfish\stockfish.exe`
+- `C:\stockfish\stockfish.exe`
+- `/opt/homebrew/bin/stockfish` (macOS Homebrew)
+- `/usr/bin/stockfish`, `/usr/games/stockfish` (Linux)
+
+If it's somewhere else, pass `--stockfish "path/to/stockfish"` at runtime.
+
+---
+
+## Install dependencies
 
 ```bash
-git clone <your-repo-url>
-cd chess_analyzer
+# Python
+pip install -r backend/requirements.txt
+
+# Node
+cd frontend && npm install && cd ..
 ```
 
-### 2. Create Environment File
+---
 
-Copy the example environment file and update it with your configuration:
+## Run
 
 ```bash
-cp .env.example .env
+python run_local.py
+# or with explicit Stockfish path:
+python run_local.py --stockfish "C:/path/to/stockfish.exe"
+# backend only (skip frontend):
+python run_local.py --no-frontend
+# custom MongoDB URL:
+python run_local.py --mongo-url mongodb://localhost:27017/chessmirror
 ```
 
-Edit `.env` and add your OAuth credentials (see OAuth Setup section below).
+`run_local.py` will:
+1. Check MongoDB connectivity (exits with instructions if unreachable)
+2. Locate Stockfish (warns but continues if not found)
+3. Start the FastAPI backend at `http://localhost:8000` using SQLite
+4. Start the Next.js frontend at `http://localhost:3000`
 
-### 3. Start All Services
+Press `Ctrl+C` to stop both.
 
-```bash
-docker-compose up -d
-```
+---
 
-This will start:
-- PostgreSQL database on port 5432
-- MongoDB on port 27017
-- Redis on port 6379
-- Backend API on port 8000
-- Frontend on port 3000
-- Celery worker for background jobs
+## What run_local.py replaces vs Docker
 
-### 4. Initialize the Database
+| Docker service | Local equivalent |
+|---|---|
+| PostgreSQL | SQLite (`backend/chessmirror.db`, auto-created) |
+| Redis | Eliminated — analysis runs inside FastAPI via BackgroundTasks |
+| Celery worker | Eliminated — same as above |
+| MongoDB | Still required — install locally (see above) |
+| Stockfish | Binary on your machine (see above) |
 
-The PostgreSQL database will be automatically initialized with the schema from `database/init.sql`.
+---
 
-For MongoDB, indexes will be created automatically when the backend starts.
+## Environment variables
 
-### 5. Access the Application
+No `.env` file is required. `run_local.py` sets all necessary variables automatically:
 
-- Frontend: http://localhost:3000
-- Backend API: http://localhost:8000
-- API Documentation: http://localhost:8000/docs
+| Variable | Value set by run_local.py |
+|---|---|
+| `DATABASE_URL` | `sqlite:///backend/chessmirror.db` |
+| `MONGODB_URL` | `mongodb://localhost:27017/chessmirror` (or `--mongo-url`) |
+| `USE_CELERY` | `false` |
+| `STOCKFISH_PATH` | detected or `--stockfish` argument |
+| `JWT_SECRET` | `local-dev-secret-not-for-production` |
 
-## Manual Setup (Without Docker)
+For production, set these as real environment variables before starting the server.
 
-If you prefer to run services manually:
-
-### 1. Start Infrastructure Services
-
-You'll need PostgreSQL, MongoDB, and Redis running. You can use Docker for just these services:
-
-```bash
-docker-compose up -d postgres mongodb redis
-```
-
-Or install them locally following their official documentation.
-
-### 2. Set Up Backend
-
-```bash
-cd backend
-
-# Create virtual environment
-python -m venv venv
-
-# Activate virtual environment
-# On Windows:
-venv\Scripts\activate
-# On macOS/Linux:
-source venv/bin/activate
-
-# Install dependencies
-pip install -r requirements.txt
-
-# Initialize database (if not using Docker)
-psql -U chessmirror -d chessmirror -f ../database/init.sql
-
-# Start the backend
-uvicorn main:app --reload --host 0.0.0.0 --port 8000
-```
-
-### 3. Start Celery Worker
-
-In a new terminal:
-
-```bash
-cd backend
-source venv/bin/activate  # or venv\Scripts\activate on Windows
-celery -A tasks.celery_app worker --loglevel=info --concurrency=4
-```
-
-### 4. Set Up Frontend
-
-In a new terminal:
-
-```bash
-cd frontend
-
-# Install dependencies
-npm install
-
-# Start development server
-npm run dev
-```
-
-The frontend will be available at http://localhost:3000
-
-## OAuth Setup
-
-To enable authentication, you need to register OAuth applications with Chess.com and Lichess.
-
-### Chess.com OAuth
-
-1. Go to https://www.chess.com/clubs/forum/view/developer-community
-2. Contact Chess.com developer support to request API access
-3. They will provide you with:
-   - Client ID
-   - Client Secret
-   - You'll need to specify your redirect URI: `http://localhost:3000/auth/chess-com/callback`
-
-Add to your `.env` file:
-```
-CHESS_COM_CLIENT_ID=your-client-id
-CHESS_COM_CLIENT_SECRET=your-client-secret
-CHESS_COM_REDIRECT_URI=http://localhost:3000/auth/chess-com/callback
-```
-
-### Lichess OAuth
-
-1. Go to https://lichess.org/account/oauth/app
-2. Click "New OAuth App"
-3. Fill in:
-   - Name: ChessMirror Local Development
-   - Redirect URI: `http://localhost:3000/auth/lichess/callback`
-   - Description: Local development instance
-4. Copy the Client ID
-
-Add to your `.env` file:
-```
-LICHESS_CLIENT_ID=your-client-id
-LICHESS_REDIRECT_URI=http://localhost:3000/auth/lichess/callback
-```
-
-## Stockfish Setup
-
-The backend requires Stockfish for chess analysis.
-
-### Docker
-
-Stockfish is automatically installed in the Docker container.
-
-### Manual Installation
-
-#### Ubuntu/Debian
-```bash
-sudo apt-get install stockfish
-```
-
-#### macOS
-```bash
-brew install stockfish
-```
-
-#### Windows
-1. Download from https://stockfishchess.org/download/
-2. Extract to a location (e.g., `C:\stockfish\`)
-3. Update `.env`:
-```
-STOCKFISH_PATH=C:\stockfish\stockfish.exe
-```
+---
 
 ## Troubleshooting
 
-### Database Connection Issues
+**MongoDB connection failed at startup**
+- Check the service is running: Windows → Services → MongoDB → Start
+- Or: `brew services start mongodb-community` (macOS)
 
-If you get database connection errors:
+**Stockfish not found**
+- Pass the path explicitly: `python run_local.py --stockfish "C:/path/to/stockfish.exe"`
+- Analysis jobs will fail without it; everything else still works
 
-1. Make sure PostgreSQL is running:
-```bash
-docker-compose ps
-```
+**`psycopg2` install error**
+- `psycopg2-binary` is in `requirements.txt` but is unused when running locally with SQLite
+- If it fails to install, you can remove it from `requirements.txt` — it won't affect local operation
 
-2. Check the DATABASE_URL in `.env` matches your setup
-
-3. Test connection:
-```bash
-psql -U chessmirror -d chessmirror -h localhost
-```
-
-### Frontend Can't Connect to Backend
-
-1. Check that NEXT_PUBLIC_API_URL in `.env` is correct
-2. Verify backend is running on port 8000
-3. Check CORS settings in `backend/main.py`
-
-### Celery Worker Not Processing Jobs
-
-1. Make sure Redis is running
-2. Check Celery worker logs
-3. Verify REDIS_URL in `.env` is correct
-
-## Next Steps
-
-1. Import some games from Chess.com or Lichess
-2. Wait for analysis to complete
-3. View your patterns on the dashboard
-
-For Phase 2 development (Stockfish analysis and pattern detection), see the implementation plan in `ImplementationPlan.md`.
-
-## Development
-
-### Running Tests
-
-```bash
-# Backend tests
-cd backend
-pytest
-
-# Frontend tests
-cd frontend
-npm test
-```
-
-### Viewing Logs
-
-```bash
-# View all logs
-docker-compose logs -f
-
-# View specific service logs
-docker-compose logs -f backend
-docker-compose logs -f worker
-```
-
-### Stopping Services
-
-```bash
-# Stop all services
-docker-compose down
-
-# Stop and remove volumes (this will delete all data!)
-docker-compose down -v
-```
-
-## Production Deployment
-
-For production deployment, see `docker-compose.prod.yml` and update:
-
-1. Change all passwords and secrets
-2. Set up proper SSL certificates
-3. Configure nginx reverse proxy
-4. Set up monitoring and logging
-5. Configure backups for databases
+**Port already in use**
+- Backend default: 8000 — kill any existing uvicorn process
+- Frontend default: 3000 — kill any existing Next.js process

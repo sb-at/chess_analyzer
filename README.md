@@ -50,86 +50,37 @@ chess_analyzer/
 
 ### Prerequisites
 
-- Python 3.11+
+- Python 3.10+
 - Node.js 18+
-- Docker and Docker Compose
-- Stockfish chess engine
+- MongoDB Community — the only required external service ([download](https://www.mongodb.com/try/download/community), install as a service)
+- Stockfish chess engine ([download](https://stockfishchess.org/download/), just unzip)
 
-### Local Development
+### Setup (one time)
 
-1. Clone the repository
 ```bash
 git clone <repository-url>
 cd chess_analyzer
+pip install -r backend/requirements.txt
+cd frontend && npm install && cd ..
 ```
 
-2. Start services with Docker Compose
+### Run
+
 ```bash
-docker-compose up -d
+python run_local.py --stockfish "C:/path/to/stockfish.exe"
 ```
 
-3. Install backend dependencies
-```bash
-cd backend
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-pip install -r requirements.txt
-```
+Open `http://localhost:3000`, enter a chess username (Lichess or Chess.com), and go.
 
-4. Install frontend dependencies
-```bash
-cd frontend
-npm install
-```
+No Docker, no `.env` file, no OAuth credentials needed.
 
-5. Run database migrations
-```bash
-cd backend
-alembic upgrade head
-```
-
-6. Start development servers
-```bash
-# Backend (from backend/)
-uvicorn main:app --reload
-
-# Frontend (from frontend/)
-npm run dev
-```
-
-## Environment Variables
-
-Create a `.env` file in the root directory:
-
-```
-# Database
-DATABASE_URL=postgresql://user:password@localhost:5432/chessmirror
-MONGODB_URL=mongodb://localhost:27017/chessmirror
-
-# Redis
-REDIS_URL=redis://localhost:6379/0
-
-# JWT
-JWT_SECRET=your-secret-key-here
-
-# Chess.com OAuth
-CHESS_COM_CLIENT_ID=your-client-id
-CHESS_COM_CLIENT_SECRET=your-client-secret
-CHESS_COM_REDIRECT_URI=http://localhost:3000/auth/chess-com/callback
-
-# Lichess OAuth
-LICHESS_CLIENT_ID=your-client-id
-LICHESS_REDIRECT_URI=http://localhost:3000/auth/lichess/callback
-
-# Stockfish
-STOCKFISH_PATH=/usr/games/stockfish
-```
+`run_local.py` automatically uses SQLite instead of PostgreSQL and runs analysis in-process instead of Celery, so MongoDB is the only external dependency.
 
 ## Development Phases
 
 - [x] Phase 1: Foundation (Setup, Auth, Game Import)
-- [ ] Phase 2: Analysis Engine (Stockfish, Pattern Detection)
-- [ ] Phase 3: Frontend Dashboard
+- [x] Phase 2: Analysis Engine (Stockfish, Pattern Detection)
+- [x] Phase 3: Frontend Dashboard + InstanceViewer
 - [ ] Phase 4: Polish & Testing
 - [ ] Phase 5: Beta Launch
 
