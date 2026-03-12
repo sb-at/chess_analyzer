@@ -58,6 +58,7 @@ services:
       - REDIS_URL=redis://redis:6379/0
       - JWT_SECRET=dev-secret-key-change-in-production
       - STOCKFISH_PATH=/usr/games/stockfish
+      - WATCHFILES_FORCE_POLLING=true
     volumes:
       - ./backend:/app
     depends_on:
@@ -100,14 +101,14 @@ services:
       - "3000:3000"
     environment:
       - NEXT_PUBLIC_API_URL=http://localhost:8000
+      - WATCHPACK_POLLING=true
+      - CHOKIDAR_USEPOLLING=true
     volumes:
       - ./frontend:/app
       - /app/node_modules
     depends_on:
       - backend
     command: npm run dev
-    # NOTE: Hot reload may not work reliably. Restart container to see changes:
-    # docker restart chessmirror-frontend
 
 volumes:
   postgres_data:

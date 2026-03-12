@@ -43,11 +43,6 @@ export default function SelectTimeControl() {
         const data = await response.json()
         setTimeControls(data.time_controls)
         setLoading(false)
-
-        // Auto-select if only one time control
-        if (data.time_controls.length === 1) {
-          handleSelectTimeControl(data.time_controls[0].time_control)
-        }
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to fetch time controls')
         setLoading(false)
