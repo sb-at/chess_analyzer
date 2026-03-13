@@ -4,6 +4,20 @@ import { useState, useEffect, useMemo } from 'react'
 import { Chess } from 'chess.js'
 import { Chessboard } from 'react-chessboard'
 
+function uciToSan(fen: string, uciMove: string): string {
+  try {
+    const chess = new Chess(fen)
+    const move = chess.move({
+      from: uciMove.substring(0, 2) as any,
+      to: uciMove.substring(2, 4) as any,
+      promotion: uciMove.length > 4 ? (uciMove[4] as any) : undefined,
+    })
+    return move ? move.san : uciMove
+  } catch {
+    return uciMove
+  }
+}
+
 interface Instance {
   game_id: string
   fen: string
@@ -193,6 +207,22 @@ export default function InstanceViewer({
     clearSelection()
   }
 
+  const handleTryAgain = () => {
+    if (!currentInstance) return
+    try {
+      setGame(new Chess(currentInstance.fen))
+    } catch (error) {
+      console.error('Error resetting position:', error)
+    }
+    setUserTryMode(true)
+    setShowBestMove(false)
+    setMoveResultStyles({})
+    setCustomArrows([])
+    setUserMadeMove(false)
+    setMoveWasBest(false)
+    clearSelection()
+  }
+
   // Shared move logic used by both drag-and-drop and click-to-move
   const applyMove = (sourceSquare: string, targetSquare: string): boolean => {
     if (!game) return false
@@ -205,7 +235,7 @@ export default function InstanceViewer({
       })
 
       if (move) {
-        const isBestMove = currentInstance.best_move === `${sourceSquare}${targetSquare}`
+        const isBestMove = `${move.from}${move.to}` === currentInstance.best_move?.substring(0, 4)
         setUserMadeMove(true)
         setMoveWasBest(isBestMove)
 
@@ -281,7 +311,7 @@ export default function InstanceViewer({
     }
   }
 
-  const boardOrientation = currentInstance.user_color === 'black' ? 'black' : 'white'
+  const boardOrientation = currentInstance.user_color?.toLowerCase() === 'black' ? 'black' : 'white'
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
@@ -328,11 +358,15 @@ export default function InstanceViewer({
               {/* Action Buttons */}
               <div className="flex gap-3 mt-4">
                 <button
-                  onClick={handleTryYourself}
+                  onClick={userMadeMove && !moveWasBest ? handleTryAgain : handleTryYourself}
                   disabled={userTryMode && !userMadeMove}
                   className="flex-1 px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed font-medium transition-colors"
                 >
-                  {userTryMode && !userMadeMove ? 'Make your move...' : 'Try Yourself'}
+                  {userTryMode && !userMadeMove
+                    ? 'Make your move...'
+                    : userMadeMove && !moveWasBest
+                    ? 'Try Again'
+                    : 'Try Yourself'}
                 </button>
                 <button
                   onClick={handleShowBestMove}
@@ -372,7 +406,7 @@ export default function InstanceViewer({
                     <div className="flex justify-between">
                       <span className="text-gray-600">Best move:</span>
                       <span className="font-mono text-green-700 font-bold">
-                        {currentInstance.best_move}
+                        {uciToSan(currentInstance.fen, currentInstance.best_move)}
                       </span>
                     </div>
                   )}

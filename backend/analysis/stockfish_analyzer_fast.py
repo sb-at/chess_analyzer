@@ -151,23 +151,32 @@ class FastStockfishAnalyzer:
                 # If eval went from +2 to -2, that's a 4 point swing (bad move)
                 eval_swing = abs(previous_eval - (-eval_after))
 
-                # Classify move quality
-                is_blunder = eval_swing > 2.0
-                is_mistake = 1.0 < eval_swing <= 2.0
-                is_inaccuracy = 0.5 < eval_swing <= 1.0
+                # If the user played the best move, it cannot be a mistake.
+                # The eval_swing approximation (using -eval_before instead of the
+                # actual post-move eval) can produce false positives here.
+                if best_move and move.uci() == best_move:
+                    is_blunder = False
+                    is_mistake = False
+                    is_inaccuracy = False
+                    centipawn_loss = 0
+                    accuracy = 100
+                else:
+                    # Classify move quality
+                    is_blunder = eval_swing > 2.0
+                    is_mistake = 1.0 < eval_swing <= 2.0
+                    is_inaccuracy = 0.5 < eval_swing <= 1.0
 
-                if is_blunder:
-                    blunders += 1
-                elif is_mistake:
-                    mistakes += 1
-                elif is_inaccuracy:
-                    inaccuracies += 1
+                    if is_blunder:
+                        blunders += 1
+                    elif is_mistake:
+                        mistakes += 1
+                    elif is_inaccuracy:
+                        inaccuracies += 1
 
-                centipawn_loss = int(eval_swing * 100)
+                    centipawn_loss = int(eval_swing * 100)
+                    accuracy = max(0, min(100, 100 - (centipawn_loss / 3)))
+
                 total_centipawn_loss += centipawn_loss
-
-                # Calculate accuracy (100 = perfect, 0 = terrible)
-                accuracy = max(0, min(100, 100 - (centipawn_loss / 3)))
             else:
                 # Opening moves - assume good
                 is_blunder = False

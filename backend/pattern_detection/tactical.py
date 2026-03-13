@@ -287,7 +287,15 @@ class TacticalPatternDetector:
             return 'tactical'
 
     def _is_fork_position(self, board: chess.Board, move: chess.Move) -> bool:
-        """Check if move creates a fork."""
+        """Check if move creates a fork (any piece type attacking 2+ more-valuable enemies)."""
+        PIECE_VALUES = {
+            chess.PAWN: 1,
+            chess.KNIGHT: 3,
+            chess.BISHOP: 3,
+            chess.ROOK: 5,
+            chess.QUEEN: 9,
+            chess.KING: 100,
+        }
         try:
             board_copy = board.copy()
             board_copy.push(move)
@@ -296,40 +304,49 @@ class TacticalPatternDetector:
             if not piece:
                 return False
 
-            # Knights are classic forking pieces
-            if piece.piece_type == chess.KNIGHT:
-                attacks = board_copy.attacks(move.to_square)
-                valuable_attacks = 0
+            attacker_value = PIECE_VALUES.get(piece.piece_type, 0)
+            forked = 0
 
-                for square in attacks:
-                    target = board_copy.piece_at(square)
-                    if target and target.color != piece.color:
-                        if target.piece_type in [chess.QUEEN, chess.ROOK, chess.KING]:
-                            valuable_attacks += 1
+            for square in board_copy.attacks(move.to_square):
+                target = board_copy.piece_at(square)
+                if target and target.color != piece.color:
+                    target_value = PIECE_VALUES.get(target.piece_type, 0)
+                    # Target must be worth more than the attacker so the trade is
+                    # profitable for whichever target the opponent chooses to save.
+                    if target_value > attacker_value or target.piece_type == chess.KING:
+                        forked += 1
 
-                return valuable_attacks >= 2
-
-            return False
+            return forked >= 2
         except:
             return False
 
     def _is_pin_position(self, board: chess.Board, move: chess.Move) -> bool:
-        """Check if position involves a pin."""
+        """Check if move creates a NEW pin that did not exist before."""
         try:
             piece = board.piece_at(move.from_square)
             if not piece:
                 return False
 
-            # Bishops, rooks, and queens can create pins
-            if piece.piece_type in [chess.BISHOP, chess.ROOK, chess.QUEEN]:
-                board_copy = board.copy()
-                board_copy.push(move)
+            # Only sliders can create pins
+            if piece.piece_type not in [chess.BISHOP, chess.ROOK, chess.QUEEN]:
+                return False
 
-                # Check if any enemy piece is now pinned
-                enemy_color = not piece.color
-                for square in chess.SQUARES:
-                    if board_copy.is_pinned(enemy_color, square):
-                        return True
+            enemy_color = not piece.color
+
+            # Record which enemy squares are already pinned before the move
+            pinned_before = {
+                sq for sq in chess.SQUARES
+                if board.is_pinned(enemy_color, sq) and board.piece_at(sq)
+            }
+
+            board_copy = board.copy()
+            board_copy.push(move)
+
+            # A new pin exists if an enemy piece is pinned after the move
+            # but was not pinned before
+            for sq in chess.SQUARES:
+                if sq not in pinned_before and board_copy.is_pinned(enemy_color, sq) and board_copy.piece_at(sq):
+                    return True
 
             return False
         except:
@@ -422,7 +439,7 @@ class TacticalPatternDetector:
             return False
 
     def _is_skewer_position(self, board: chess.Board, move: chess.Move) -> bool:
-        """Check if move creates a skewer (attacking through valuable piece to another)."""
+        """Check if move creates a skewer (attacking through a valuable piece to another)."""
         try:
             piece = board.piece_at(move.from_square)
             if not piece or piece.piece_type not in [chess.BISHOP, chess.ROOK, chess.QUEEN]:
@@ -430,23 +447,29 @@ class TacticalPatternDetector:
 
             board_copy = board.copy()
             board_copy.push(move)
-
-            # Check if we're attacking a valuable piece with something behind it
-            attacks = board_copy.attacks(move.to_square)
             enemy_color = not piece.color
+            attacker_sq = move.to_square
 
-            for attacked_square in attacks:
-                attacked_piece = board_copy.piece_at(attacked_square)
-                if attacked_piece and attacked_piece.color == enemy_color:
-                    if attacked_piece.piece_type in [chess.QUEEN, chess.ROOK, chess.KING]:
-                        # Check if there's a piece behind it on the same line
-                        direction = self._get_direction(move.to_square, attacked_square)
-                        if direction:
-                            behind_square = attacked_square + direction
-                            if chess.square_is_valid(behind_square):
-                                behind_piece = board_copy.piece_at(behind_square)
-                                if behind_piece and behind_piece.color == enemy_color:
-                                    return True
+            for attacked_sq in board_copy.attacks(attacker_sq):
+                attacked_piece = board_copy.piece_at(attacked_sq)
+                if not attacked_piece or attacked_piece.color != enemy_color:
+                    continue
+                if attacked_piece.piece_type not in [chess.QUEEN, chess.ROOK, chess.KING]:
+                    continue
+
+                # Use the ray bitboard to find pieces further along the same line.
+                # A square is "beyond" attacked_sq when attacked_sq lies between
+                # attacker_sq and that square.
+                ray_mask = chess.BB_RAYS[attacker_sq][attacked_sq]
+                for beyond_sq in chess.SquareSet(ray_mask):
+                    if beyond_sq == attacker_sq or beyond_sq == attacked_sq:
+                        continue
+                    # Skip squares that are on the attacker's side of attacked_sq
+                    if not (chess.BB_SQUARES[attacked_sq] & chess.BB_BETWEEN[attacker_sq][beyond_sq]):
+                        continue
+                    beyond_piece = board_copy.piece_at(beyond_sq)
+                    if beyond_piece and beyond_piece.color == enemy_color:
+                        return True
 
             return False
         except:
@@ -549,25 +572,6 @@ class TacticalPatternDetector:
             return valuable_attacks >= 2
         except:
             return False
-
-    def _get_direction(self, from_square: int, to_square: int) -> Optional[int]:
-        """Get the direction between two squares."""
-        try:
-            file_diff = chess.square_file(to_square) - chess.square_file(from_square)
-            rank_diff = chess.square_rank(to_square) - chess.square_rank(from_square)
-
-            if file_diff == 0:
-                return 8 if rank_diff > 0 else -8
-            elif rank_diff == 0:
-                return 1 if file_diff > 0 else -1
-            elif abs(file_diff) == abs(rank_diff):
-                file_step = 1 if file_diff > 0 else -1
-                rank_step = 8 if rank_diff > 0 else -8
-                return file_step + rank_step
-
-            return None
-        except:
-            return None
 
     def _aggregate_patterns(self, mistakes: List[Dict], pattern_prefix: str = 'missed_') -> List[Dict]:
         """Group similar tactical patterns together.
