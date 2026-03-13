@@ -52,7 +52,16 @@ async def get_opening_instances(
         moves = game.get('moves', [])
         opening_moves = [m for m in moves if m.get('move_number', 0) <= 15]
 
+        game_user_color = game.get('user_color', 'white').lower()
+        user_is_white = game_user_color == 'white'
+
         for move in opening_moves:
+            # Only include moves where it is the user's turn
+            move_num = move.get('move_number', 0)
+            is_white_move = (move_num % 1) == 0
+            if is_white_move != user_is_white:
+                continue
+
             if move.get('is_mistake') or move.get('is_blunder') or move.get('centipawn_loss', 0) > 50:
                 instances.append({
                     'game_id': str(game['_id']),

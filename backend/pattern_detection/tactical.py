@@ -123,7 +123,12 @@ class TacticalPatternDetector:
         return mistakes
 
     def _collect_defensive_mistakes(self, games: List[Dict]) -> List[Dict]:
-        """Collect instances where user fell for opponent's tactics."""
+        """Collect instances where user's move allowed the opponent to gain a significant advantage.
+
+        Stores the user's position (fen_before) and the best defensive move the user
+        should have played, so the viewer shows what white/black should have done
+        differently — not the opponent's subsequent tactic.
+        """
         defensive_errors = []
 
         for game in games:
@@ -136,8 +141,11 @@ class TacticalPatternDetector:
             white_player = game.get('white', {}).get('username', '').lower()
 
             for i, move_data in enumerate(moves):
-                # Check if opponent's next move causes a big eval swing
                 if i + 1 >= len(moves):
+                    continue
+
+                # Only look at analyzed moves (opening moves have no eval data)
+                if not move_data.get('analyzed'):
                     continue
 
                 next_move = moves[i + 1]
@@ -148,42 +156,55 @@ class TacticalPatternDetector:
                 is_user_move = (is_white_move and username == white_player) or \
                                (not is_white_move and username != white_player)
 
-                # Only track opponent's tactics against the user
                 if not is_user_move:
                     continue
 
-                # Check if opponent's next move was devastating
-                opponent_move = next_move
-                if opponent_move.get('is_blunder') or opponent_move.get('centipawn_loss', 0) > 200:
-                    # This means opponent made a mistake, not us
+                # Skip moves already flagged as blunders/mistakes — those are covered
+                # by _collect_missed_tactics to avoid double-counting
+                if move_data.get('is_blunder') or move_data.get('is_mistake'):
                     continue
 
-                # Check if user's position got much worse after opponent's move
-                eval_before = move_data.get('eval_after', 0)
-                eval_after_opponent = opponent_move.get('eval_after', 0)
+                # Opponent's eval_before (from their perspective) tells us how good their
+                # position is after the user's move.  Values are in pawns.
+                next_eval_before = next_move.get('eval_before')
+                if next_eval_before is None:
+                    continue
 
-                # Calculate eval swing from user's perspective
-                eval_swing = abs(eval_before - eval_after_opponent) if eval_before else 0
+                # If opponent has > 1.5 pawn advantage and didn't blunder it away,
+                # the user's move left a vulnerable position
+                if next_eval_before < 1.5:
+                    continue
 
-                if eval_swing > 200:  # Significant loss in position
-                    # Identify what tactic the opponent used
-                    motif = self._identify_defensive_weakness_motif(
-                        move_data.get('fen_after', ''),
-                        opponent_move.get('move', ''),
-                        move_data.get('move', '')
-                    )
+                if next_move.get('is_blunder'):
+                    continue
 
-                    defensive_errors.append({
-                        'game_id': game_id,
-                        'move_number': opponent_move.get('move_number'),
-                        'fen': move_data.get('fen_after'),
-                        'user_move': move_data.get('move'),
-                        'opponent_move': opponent_move.get('move'),
-                        'san': opponent_move.get('san'),
-                        'eval_loss': int(eval_swing),
-                        'motif': motif,
-                        'date': game.get('date')
-                    })
+                # If the user already played the best defensive move, don't flag it —
+                # the position was simply bad regardless
+                best_move = move_data.get('best_move')
+                played_move = move_data.get('move')
+                if best_move and played_move and best_move[:4] == played_move[:4]:
+                    continue
+
+                # Identify what tactic the opponent could use
+                motif = self._identify_defensive_weakness_motif(
+                    move_data.get('fen_after', ''),
+                    next_move.get('move', ''),
+                    move_data.get('move', '')
+                )
+
+                defensive_errors.append({
+                    'game_id': game_id,
+                    'move_number': move_data.get('move_number'),
+                    # Store USER's position so the board shows the user's turn
+                    'fen': move_data.get('fen_before'),
+                    'missed_move': move_data.get('best_move'),  # best defensive move for user
+                    'played_move': move_data.get('move'),
+                    'san': move_data.get('san'),  # user's actual move
+                    'eval_loss': int(next_eval_before * 100),
+                    'motif': motif,
+                    'is_mistake': True,
+                    'date': game.get('date')
+                })
 
         return defensive_errors
 

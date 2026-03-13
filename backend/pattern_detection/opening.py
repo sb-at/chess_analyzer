@@ -69,14 +69,21 @@ class OpeningPatternDetector:
 
             # Analyze opening accuracy (first 20 plies = 10 moves)
             if game.get('analyzed') and game.get('moves'):
+                user_is_white = user_color.lower() == 'white'
                 opening_moves = [m for m in game['moves'] if m.get('move_number', 0) <= 10]
 
-                if opening_moves:
-                    avg_accuracy = sum(m.get('accuracy', 0) for m in opening_moves) / len(opening_moves)
+                # Only count the user's own moves for accuracy and mistake tracking
+                user_opening_moves = [
+                    m for m in opening_moves
+                    if ((m.get('move_number', 0) % 1) == 0) == user_is_white
+                ]
+
+                if user_opening_moves:
+                    avg_accuracy = sum(m.get('accuracy', 0) for m in user_opening_moves) / len(user_opening_moves)
                     stats['total_accuracy'] += avg_accuracy
 
                     # Track mistakes by move number
-                    for move in opening_moves:
+                    for move in user_opening_moves:
                         if move.get('is_mistake') or move.get('is_blunder'):
                             move_num = int(move.get('move_number', 0))
                             stats['mistakes_by_move'][move_num].append({
