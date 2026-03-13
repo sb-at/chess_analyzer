@@ -86,9 +86,11 @@ class TacticalPatternDetector:
             white_player = game.get('white', {}).get('username', '').lower()
 
             for move_data in moves:
-                # Determine if this is the user's move
+                # Determine if this is the user's move.
+                # move_number is stored as integers for white (1, 2, 3...)
+                # and as n.5 for black (1.5, 2.5, 3.5...).
                 move_num = move_data.get('move_number', 0)
-                is_white_move = (move_num % 1) == 0.5 if move_num > 0 else True
+                is_white_move = (move_num % 1) == 0
                 is_user_move = (is_white_move and username == white_player) or \
                                (not is_white_move and username != white_player)
 
@@ -142,7 +144,7 @@ class TacticalPatternDetector:
 
                 # Determine if current move is user's move
                 move_num = move_data.get('move_number', 0)
-                is_white_move = (move_num % 1) == 0.5 if move_num > 0 else True
+                is_white_move = (move_num % 1) == 0
                 is_user_move = (is_white_move and username == white_player) or \
                                (not is_white_move and username != white_player)
 

@@ -89,8 +89,19 @@ class FastStockfishAnalyzer:
         OPTIMIZATIONS:
         - Only analyzes position BEFORE move (not after)
         - Skips opening book moves (first N moves)
-        - Uses eval difference to estimate quality
-        - Adaptive depth for simple vs complex positions
+        - Two-pass approach: collect evals first, then compute eval_loss correctly
+
+        EVAL LOSS FORMULA:
+        eval_loss[i] = max(0, eval_before[i] + eval_before[i+1])
+
+        score.relative is always from the side-to-move's perspective, so adding
+        consecutive relative evals gives the true eval drop for the moving player,
+        regardless of whether they are white or black. No perspective flipping needed.
+
+        THRESHOLDS:
+        - eval_loss < 1.0 pawn: not flagged
+        - 1.0 <= eval_loss <= 2.0: mistake
+        - eval_loss > 2.0: blunder
 
         Args:
             pgn_string: PGN notation of the game
@@ -108,105 +119,131 @@ class FastStockfishAnalyzer:
             raise ValueError("Invalid PGN string")
 
         board = pgn.board()
-        moves_analysis = []
         move_number = 1
 
-        # Track statistics
-        total_centipawn_loss = 0
-        blunders = 0
-        mistakes = 0
-        inaccuracies = 0
-
-        previous_eval = 0.0  # Starting position eval
-
+        # --- Pass 1: analyze each position BEFORE its move ---
+        raw_moves = []
         for move in pgn.mainline_moves():
-            # Get FEN before move
             fen_before = board.fen()
-
-            # Determine if we should analyze this move
-            half_moves = int(move_number * 2)  # Convert to half-moves
+            half_moves = int(move_number * 2)
             should_analyze = half_moves > skip_opening_moves
 
             if should_analyze:
-                # Analyze position BEFORE move only
                 analysis = self.analyze_position(fen_before, depth=self.depth)
                 eval_before = analysis['evaluation']
                 best_move = analysis['best_move']
             else:
-                # Skip analysis for opening moves (assume book moves)
-                eval_before = 0.0
+                eval_before = None
                 best_move = None
 
-            # Make the move
             san_move = board.san(move)
             board.push(move)
 
-            # Calculate evaluation after move by flipping perspective
-            # (we don't analyze again, just flip the eval)
-            eval_after = -eval_before  # Flip perspective for opponent
-
-            # Calculate evaluation swing (how much position changed)
-            if should_analyze:
-                # Calculate from player's perspective
-                # If eval went from +2 to -2, that's a 4 point swing (bad move)
-                eval_swing = abs(previous_eval - (-eval_after))
-
-                # If the user played the best move, it cannot be a mistake.
-                # The eval_swing approximation (using -eval_before instead of the
-                # actual post-move eval) can produce false positives here.
-                if best_move and move.uci() == best_move:
-                    is_blunder = False
-                    is_mistake = False
-                    is_inaccuracy = False
-                    centipawn_loss = 0
-                    accuracy = 100
-                else:
-                    # Classify move quality
-                    is_blunder = eval_swing > 2.0
-                    is_mistake = 1.0 < eval_swing <= 2.0
-                    is_inaccuracy = 0.5 < eval_swing <= 1.0
-
-                    if is_blunder:
-                        blunders += 1
-                    elif is_mistake:
-                        mistakes += 1
-                    elif is_inaccuracy:
-                        inaccuracies += 1
-
-                    centipawn_loss = int(eval_swing * 100)
-                    accuracy = max(0, min(100, 100 - (centipawn_loss / 3)))
-
-                total_centipawn_loss += centipawn_loss
-            else:
-                # Opening moves - assume good
-                is_blunder = False
-                is_mistake = False
-                is_inaccuracy = False
-                centipawn_loss = 0
-                accuracy = 95  # Assume decent opening play
-
-            moves_analysis.append({
+            raw_moves.append({
                 'move_number': move_number,
                 'move': move.uci(),
                 'san': san_move,
                 'fen_before': fen_before,
                 'fen_after': board.fen(),
-                'eval_before': eval_before if should_analyze else None,
-                'eval_after': eval_after if should_analyze else None,
+                'eval_before': eval_before,
+                'best_move': best_move,
+                'analyzed': should_analyze,
+            })
+            move_number += 0.5
+
+        # --- Pass 2: compute eval_loss using consecutive eval_before values ---
+        moves_analysis = []
+        total_centipawn_loss = 0
+        blunders = 0
+        mistakes = 0
+        inaccuracies = 0
+
+        for i, raw in enumerate(raw_moves):
+            if not raw['analyzed']:
+                moves_analysis.append({
+                    'move_number': raw['move_number'],
+                    'move': raw['move'],
+                    'san': raw['san'],
+                    'fen_before': raw['fen_before'],
+                    'fen_after': raw['fen_after'],
+                    'eval_before': None,
+                    'eval_after': None,
+                    'best_move': None,
+                    'is_blunder': False,
+                    'is_mistake': False,
+                    'is_inaccuracy': False,
+                    'centipawn_loss': 0,
+                    'accuracy': 95,
+                    'analyzed': False,
+                })
+                continue
+
+            eval_before = raw['eval_before']
+            best_move = raw['best_move']
+
+            # Next analyzed move's eval_before (opponent's relative eval after this move)
+            next_eval = None
+            if i + 1 < len(raw_moves) and raw_moves[i + 1]['analyzed']:
+                next_eval = raw_moves[i + 1]['eval_before']
+
+            # eval_after from current player's perspective = -(opponent's eval_before)
+            eval_after = -next_eval if next_eval is not None else None
+
+            # eval_loss = how much the current player's position dropped
+            # eval_before[i] + eval_before[i+1] works because both are relative
+            # to their respective side-to-move (no perspective conversion needed)
+            if next_eval is not None:
+                eval_loss_pawns = max(0.0, eval_before + next_eval)
+            else:
+                eval_loss_pawns = 0.0
+
+            # User played best move — cannot be a mistake
+            if best_move and raw['move'] == best_move:
+                is_blunder = False
+                is_mistake = False
+                is_inaccuracy = False
+                centipawn_loss = 0
+                accuracy = 100
+            elif eval_loss_pawns >= 2.0:
+                is_blunder = True
+                is_mistake = False
+                is_inaccuracy = False
+                blunders += 1
+                centipawn_loss = int(eval_loss_pawns * 100)
+                accuracy = max(0, min(100, 100 - (centipawn_loss / 3)))
+            elif eval_loss_pawns >= 1.0:
+                is_blunder = False
+                is_mistake = True
+                is_inaccuracy = False
+                mistakes += 1
+                centipawn_loss = int(eval_loss_pawns * 100)
+                accuracy = max(0, min(100, 100 - (centipawn_loss / 3)))
+            else:
+                # Below 1 pawn threshold — not significant enough to flag
+                is_blunder = False
+                is_mistake = False
+                is_inaccuracy = False
+                centipawn_loss = int(eval_loss_pawns * 100)
+                accuracy = max(0, min(100, 100 - (centipawn_loss / 3)))
+
+            total_centipawn_loss += centipawn_loss
+
+            moves_analysis.append({
+                'move_number': raw['move_number'],
+                'move': raw['move'],
+                'san': raw['san'],
+                'fen_before': raw['fen_before'],
+                'fen_after': raw['fen_after'],
+                'eval_before': eval_before,
+                'eval_after': eval_after,
                 'best_move': best_move,
                 'is_blunder': is_blunder,
                 'is_mistake': is_mistake,
                 'is_inaccuracy': is_inaccuracy,
                 'centipawn_loss': centipawn_loss,
                 'accuracy': accuracy,
-                'analyzed': should_analyze
+                'analyzed': True,
             })
-
-            # Update previous eval for next iteration
-            if should_analyze:
-                previous_eval = eval_after
-
-            move_number += 0.5  # Half-move increment
 
         # Calculate average accuracy
         analyzed_moves = [m for m in moves_analysis if m.get('analyzed', False)]
