@@ -1,6 +1,6 @@
 # ChessMirror - Chess Pattern Analyzer
 
-**Tagline:** See your chess blind spots clearly
+See your chess blind spots clearly
 
 ## Overview
 
@@ -48,16 +48,7 @@ chess_analyzer/
 
 ## Getting Started
 
-See [SETUP.md](SETUP.md) for installation and setup instructions.
-
-## Development Phases
-
-- [x] Phase 1: Foundation (Setup, Auth, Game Import)
-- [x] Phase 2: Analysis Engine (Stockfish, Pattern Detection)
-- [x] Phase 3: Frontend Dashboard + InstanceViewer
-- [ ] Phase 4: Polish & Testing
-- [ ] Phase 5: Beta Launch
-
+See [SETUP.md](SETUP.md) for installation and setup 
 ## License
 
 MIT License
